@@ -1,0 +1,4 @@
+[submodule "third_party/LiteRT-LM"]
+	path = third_party/LiteRT-LM
+	url = https://github.com/google-ai-edge/LiteRT-LM.git
+	ignore = dirty
