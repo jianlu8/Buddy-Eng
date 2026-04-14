@@ -1,0 +1,9 @@
+.DS_Store
+DerivedData/
+build/
+Build/
+*.xcuserstate
+xcuserdata/
+EnglishBuddy.xcodeproj/project.xcworkspace/xcuserdata/
+EnglishBuddy/Support/Models/
+EnglishBuddy/Support/.build/

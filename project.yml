@@ -1,0 +1,118 @@
+name: EnglishBuddy
+options:
+  bundleIdPrefix: com.hammond
+  deploymentTarget:
+    iOS: "17.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.hammond.EnglishBuddy
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    SUPPORTS_MACCATALYST: NO
+    SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: NO
+    CLANG_CXX_LANGUAGE_STANDARD: "gnu++20"
+    CLANG_CXX_LIBRARY: "libc++"
+    SWIFT_OBJC_BRIDGING_HEADER: EnglishBuddy/Bridge/EnglishBuddy-Bridging-Header.h
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    HEADER_SEARCH_PATHS:
+      - $(inherited)
+      - $(SRCROOT)/third_party/LiteRT-LM
+targets:
+  EnglishBuddyCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: EnglishBuddyCore
+        PRODUCT_BUNDLE_IDENTIFIER: com.hammond.EnglishBuddyCore
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+    sources:
+      - path: EnglishBuddy/Core
+        excludes:
+          - LiveSpeechPipeline.swift
+          - LiteRTInferenceEngine.swift
+  EnglishBuddy:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: EnglishBuddy
+        TARGETED_DEVICE_FAMILY: "1"
+        "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+    info:
+      path: EnglishBuddy/Support/Info.plist
+      properties:
+        NSMicrophoneUsageDescription: EnglishBuddy uses the microphone for live English calls with your offline coach.
+        NSSpeechRecognitionUsageDescription: EnglishBuddy uses on-device speech recognition to transcribe your English practice in real time.
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    sources:
+      - path: EnglishBuddy
+        excludes:
+          - Resources
+    resources:
+      - path: EnglishBuddy/Resources
+    preBuildScripts:
+      - name: Build LiteRT Runtime
+        script: |
+          set -euo pipefail
+          "${SRCROOT}/Scripts/build_litert_ios_runtime.sh"
+        basedOnDependencyAnalysis: false
+      - name: Embed Bundled Model
+        script: |
+          set -euo pipefail
+          "${SRCROOT}/Scripts/embed_bundled_model.sh"
+        basedOnDependencyAnalysis: false
+    dependencies:
+      - sdk: AVFoundation.framework
+      - sdk: Speech.framework
+      - sdk: Network.framework
+      - framework: Build/LiteRTLM/LiteRTLMRuntime.xcframework
+        embed: true
+        codeSign: true
+      - framework: Build/LiteRTLM/GemmaModelConstraintProvider.xcframework
+        embed: true
+        codeSign: true
+  EnglishBuddyTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    settings:
+      base:
+        PRODUCT_NAME: EnglishBuddyTests
+        PRODUCT_BUNDLE_IDENTIFIER: com.hammond.EnglishBuddyTests
+        TEST_HOST: ""
+        BUNDLE_LOADER: ""
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: EnglishBuddyTests/Info.plist
+    sources:
+      - path: EnglishBuddyTests
+    dependencies:
+      - target: EnglishBuddyCore
+schemes:
+  EnglishBuddy:
+    build:
+      targets:
+        EnglishBuddyCore: all
+        EnglishBuddy: all
+        EnglishBuddyTests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - EnglishBuddyTests
