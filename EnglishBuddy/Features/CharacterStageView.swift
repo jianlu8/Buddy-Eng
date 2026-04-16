@@ -1,78 +1,374 @@
 import SwiftUI
+import UIKit
+
+@MainActor
+final class CharacterSpeechDriver: ObservableObject {
+    struct Input: Equatable {
+        var sourceState: AvatarState
+        var sourceAudioLevel: Double
+        var sourceLipSyncFrame: LipSyncFrame
+        var prefersContinuousAnimation: Bool
+    }
+
+    struct Output: Equatable {
+        var avatarState: AvatarState
+        var audioLevel: Double
+        var lipSyncFrame: LipSyncFrame
+    }
+
+    @Published private(set) var output: Output
+
+    private var lastInput: Input
+    private var interruptedHoldFrame: LipSyncFrame?
+    private var interruptedHoldUntil: Date?
+
+    init(
+        state: AvatarState = .idle,
+        audioLevel: Double = 0,
+        lipSyncFrame: LipSyncFrame = .neutral,
+        prefersContinuousAnimation: Bool = false
+    ) {
+        let input = Input(
+            sourceState: state,
+            sourceAudioLevel: audioLevel,
+            sourceLipSyncFrame: lipSyncFrame,
+            prefersContinuousAnimation: prefersContinuousAnimation
+        )
+        lastInput = input
+        output = Self.makeOutput(from: input, previous: nil, heldInterruptedFrame: nil)
+    }
+
+    func update(
+        state: AvatarState,
+        audioLevel: Double,
+        lipSyncFrame: LipSyncFrame,
+        prefersContinuousAnimation: Bool
+    ) {
+        let input = Input(
+            sourceState: state,
+            sourceAudioLevel: audioLevel,
+            sourceLipSyncFrame: lipSyncFrame,
+            prefersContinuousAnimation: prefersContinuousAnimation
+        )
+        guard input != lastInput else { return }
+
+        if lastInput.sourceState == .speaking, input.sourceState == .interrupted {
+            interruptedHoldFrame = Self.isNeutralFrame(output.lipSyncFrame) ? Self.normalized(lipSyncFrame) : output.lipSyncFrame
+            interruptedHoldUntil = Date().addingTimeInterval(0.12)
+        } else if input.sourceState != .interrupted {
+            interruptedHoldFrame = nil
+            interruptedHoldUntil = nil
+        }
+
+        let heldInterruptedFrame: LipSyncFrame?
+        if let interruptedHoldUntil, interruptedHoldUntil > Date() {
+            heldInterruptedFrame = interruptedHoldFrame
+        } else {
+            heldInterruptedFrame = nil
+            interruptedHoldFrame = nil
+            interruptedHoldUntil = nil
+        }
+
+        output = Self.makeOutput(from: input, previous: output, heldInterruptedFrame: heldInterruptedFrame)
+        lastInput = input
+    }
+
+    private static func makeOutput(
+        from input: Input,
+        previous: Output?,
+        heldInterruptedFrame: LipSyncFrame?
+    ) -> Output {
+        let targetAudio = quantizedAudioLevel(input.sourceAudioLevel)
+        let renderedAudio: Double
+        let renderedFrame: LipSyncFrame
+
+        if input.prefersContinuousAnimation {
+            let previousAudio = previous?.audioLevel ?? 0
+            renderedAudio = smoothedAudioLevel(
+                previous: previousAudio,
+                target: targetAudio,
+                state: input.sourceState
+            )
+
+            switch input.sourceState {
+            case .speaking:
+                let normalizedFrame = normalized(input.sourceLipSyncFrame)
+                renderedFrame = isNeutralFrame(normalizedFrame)
+                    ? synthesizedFrame(for: renderedAudio)
+                    : normalizedFrame
+            case .interrupted:
+                renderedFrame = heldInterruptedFrame ?? softClosedFrame(reference: input.sourceLipSyncFrame)
+            case .thinking, .idle, .listening, .error:
+                renderedFrame = neutralFrame(reference: input.sourceLipSyncFrame)
+            }
+        } else {
+            renderedAudio = staticSurfaceAudioLevel(for: input.sourceState, target: targetAudio)
+            renderedFrame = neutralFrame(reference: input.sourceLipSyncFrame)
+        }
+
+        return Output(
+            avatarState: input.sourceState,
+            audioLevel: renderedAudio,
+            lipSyncFrame: renderedFrame
+        )
+    }
+
+    private static func quantizedAudioLevel(_ rawValue: Double) -> Double {
+        let clamped = max(0, min(rawValue, 1))
+        return (clamped * 20).rounded() / 20
+    }
+
+    private static func smoothedAudioLevel(
+        previous: Double,
+        target: Double,
+        state: AvatarState
+    ) -> Double {
+        let gain: Double = target > previous ? 0.52 : 0.28
+        var smoothed = previous + (target - previous) * gain
+
+        switch state {
+        case .speaking:
+            smoothed = max(smoothed, max(0.08, target * 0.72))
+        case .interrupted:
+            smoothed = min(smoothed, max(0.04, target * 0.50))
+        case .thinking, .listening, .idle, .error:
+            if smoothed < 0.04 {
+                smoothed = 0
+            }
+        }
+
+        return quantizedAudioLevel(smoothed)
+    }
+
+    private static func staticSurfaceAudioLevel(for state: AvatarState, target: Double) -> Double {
+        switch state {
+        case .speaking:
+            return max(0.18, target)
+        case .thinking:
+            return 0.06
+        case .listening:
+            return 0.04
+        case .interrupted:
+            return 0.03
+        case .idle, .error:
+            return 0
+        }
+    }
+
+    private static func normalized(_ frame: LipSyncFrame) -> LipSyncFrame {
+        LipSyncFrame(
+            openness: max(0, min(frame.openness, 1)),
+            width: max(0, min(frame.width, 1)),
+            jawOffset: max(0, min(frame.jawOffset, 1)),
+            cheekLift: max(0, min(frame.cheekLift, 1)),
+            timestamp: frame.timestamp
+        )
+    }
+
+    private static func synthesizedFrame(for audioLevel: Double) -> LipSyncFrame {
+        let openness = max(0.10, min(audioLevel * 0.92, 0.78))
+        return LipSyncFrame(
+            openness: openness,
+            width: min(0.62, 0.26 + openness * 0.42),
+            jawOffset: openness * 0.64,
+            cheekLift: openness * 0.16,
+            timestamp: .now
+        )
+    }
+
+    private static func softClosedFrame(reference: LipSyncFrame) -> LipSyncFrame {
+        LipSyncFrame(
+            openness: 0.06,
+            width: 0.18,
+            jawOffset: 0.04,
+            cheekLift: 0.02,
+            timestamp: reference.timestamp
+        )
+    }
+
+    private static func neutralFrame(reference: LipSyncFrame) -> LipSyncFrame {
+        LipSyncFrame(
+            openness: 0,
+            width: 0,
+            jawOffset: 0,
+            cheekLift: 0,
+            timestamp: reference.timestamp
+        )
+    }
+
+    private static func isNeutralFrame(_ frame: LipSyncFrame) -> Bool {
+        abs(frame.openness) < 0.001
+            && abs(frame.width) < 0.001
+            && abs(frame.jawOffset) < 0.001
+            && abs(frame.cheekLift) < 0.001
+    }
+}
 
 struct CharacterStageView: View {
     let state: AvatarState
     let audioLevel: Double
+    var lipSyncFrame: LipSyncFrame = .neutral
     var emphasis: AvatarEmphasis = .compact
+    var surfaceKind: CharacterSurfaceKind? = nil
     var characterID: String? = nil
     var sceneID: String? = nil
+    var visualStyle: VideoCallVisualStyle = .natural
+    var isAnimated: Bool? = nil
+    var showsBackdrop: Bool = true
 
-    private var character: CharacterProfile {
-        CharacterCatalog.profile(for: characterID)
+    @EnvironmentObject private var performanceGovernor: PerformanceGovernor
+    @StateObject private var presentationStore: CharacterPresentationStore
+    @StateObject private var portraitRuntime = PortraitCharacterRuntime()
+    @StateObject private var speechDriver: CharacterSpeechDriver
+    @State private var lockedPreparedAvailability: Bool?
+    @State private var staticSurfaceDate: Date
+
+    init(
+        state: AvatarState,
+        audioLevel: Double,
+        lipSyncFrame: LipSyncFrame = .neutral,
+        emphasis: AvatarEmphasis = .compact,
+        surfaceKind: CharacterSurfaceKind? = nil,
+        characterID: String? = nil,
+        sceneID: String? = nil,
+        visualStyle: VideoCallVisualStyle = .natural,
+        isAnimated: Bool? = nil,
+        showsBackdrop: Bool = true
+    ) {
+        self.state = state
+        self.audioLevel = audioLevel
+        self.lipSyncFrame = lipSyncFrame
+        self.emphasis = emphasis
+        self.surfaceKind = surfaceKind
+        self.characterID = characterID
+        self.sceneID = sceneID
+        self.visualStyle = visualStyle
+        self.isAnimated = isAnimated
+        self.showsBackdrop = showsBackdrop
+
+        let prefersContinuousAnimation = isAnimated ?? (emphasis == .hero)
+        let request = CharacterPresentationStore.Request(
+            surfaceKind: CharacterPresentationStore.resolvedSurfaceKind(
+                explicit: surfaceKind,
+                emphasis: emphasis
+            ),
+            characterID: characterID,
+            sceneID: sceneID,
+            voiceBundleID: nil,
+            visualStyle: visualStyle,
+            showsBackdrop: showsBackdrop,
+            prefersContinuousAnimation: prefersContinuousAnimation
+        )
+
+        _presentationStore = StateObject(wrappedValue: CharacterPresentationStore(request: request))
+        _speechDriver = StateObject(
+            wrappedValue: CharacterSpeechDriver(
+                state: state,
+                audioLevel: audioLevel,
+                lipSyncFrame: lipSyncFrame,
+                prefersContinuousAnimation: prefersContinuousAnimation
+            )
+        )
+        _staticSurfaceDate = State(initialValue: .now)
     }
 
-    private var scene: CharacterScene {
-        CharacterCatalog.scene(for: sceneID, characterID: characterID)
+    private var shouldAnimate: Bool {
+        isAnimated ?? (emphasis == .hero)
     }
 
-    private var pack: CharacterPackManifest {
-        CharacterCatalog.pack(for: character.id)
+    private var effectiveShouldAnimate: Bool {
+        shouldAnimate && performanceGovernor.profile.allowsContinuousHeroAnimation
+    }
+
+    private var animationInterval: TimeInterval {
+        let targetFPS = max(performanceGovernor.profile.callHeroFrameRate, 1)
+        return 1.0 / targetFPS
+    }
+
+    private var presentationRequest: CharacterPresentationStore.Request {
+        CharacterPresentationStore.Request(
+            surfaceKind: CharacterPresentationStore.resolvedSurfaceKind(
+                explicit: surfaceKind,
+                emphasis: emphasis
+            ),
+            characterID: characterID,
+            sceneID: sceneID,
+            voiceBundleID: nil,
+            visualStyle: visualStyle,
+            showsBackdrop: showsBackdrop,
+            prefersContinuousAnimation: effectiveShouldAnimate
+        )
+    }
+
+    private var speechInput: CharacterSpeechDriver.Input {
+        CharacterSpeechDriver.Input(
+            sourceState: state,
+            sourceAudioLevel: audioLevel,
+            sourceLipSyncFrame: lipSyncFrame,
+            prefersContinuousAnimation: effectiveShouldAnimate
+        )
+    }
+
+    private var presentation: CharacterPresentationStore.Presentation {
+        presentationStore.presentation
+    }
+
+    private var usesPhotoRuntime: Bool {
+        presentation.usesPhotoRuntime
+    }
+
+    private var isCallHeroSurface: Bool {
+        presentation.continuitySnapshot.surfaceKind == .callHero
     }
 
     var body: some View {
         GeometryReader { proxy in
-            TimelineView(.animation) { timeline in
-                let metrics = CharacterStageMetrics(size: proxy.size, emphasis: emphasis)
-                let palette = CharacterStagePalette.palette(for: character.id)
-                let pose = CharacterStagePose(
-                    time: timeline.date.timeIntervalSinceReferenceDate,
-                    state: state,
-                    audioLevel: audioLevel,
-                    lipSyncStyle: pack.lipSyncStyle
-                )
-
-                ZStack {
-                    CharacterStageBackground(
-                        scene: scene,
-                        palette: palette,
-                        metrics: metrics,
-                        state: state,
-                        pose: pose
-                    )
-
-                    CharacterPortrait(
-                        character: character,
-                        scene: scene,
-                        pack: pack,
-                        palette: palette,
-                        pose: pose,
-                        metrics: metrics,
-                        state: state
-                    )
-                    .frame(width: metrics.canvasSize.width, height: metrics.canvasSize.height)
-                    .scaleEffect(metrics.scale, anchor: .center)
-                    .offset(y: metrics.verticalOffset)
-
-                    if state == .thinking {
-                        ThinkingHalo(color: palette.accent, metrics: metrics, pose: pose)
-                            .scaleEffect(metrics.scale, anchor: .center)
-                            .offset(y: metrics.verticalOffset - (emphasis == .hero ? 4 : 2))
-                    }
-
-                    if let badge = badgeText {
-                        StageBadge(text: badge, palette: palette)
-                            .padding(.top, emphasis == .hero ? 18 : 12)
-                            .padding(.horizontal, emphasis == .hero ? 18 : 12)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
+            if effectiveShouldAnimate {
+                TimelineView(.animation(minimumInterval: animationInterval)) { timeline in
+                    renderedStage(size: proxy.size, date: timeline.date)
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height)
+            } else {
+                renderedStage(size: proxy.size, date: staticSurfaceDate)
             }
+        }
+        .task(id: presentationRequest) {
+            presentationStore.update(presentationRequest)
+
+            guard usesPhotoRuntime else {
+                lockedPreparedAvailability = nil
+                return
+            }
+            // Keep a single renderer path for the lifetime of this surface to avoid
+            // jumping between static/photo-prepared compositions after the view appears.
+            let hasPreparedSnapshot = PortraitCharacterRuntime.cachedPreparedSnapshot(for: presentation.characterBundle) != nil
+            lockedPreparedAvailability = hasPreparedSnapshot
+
+            // Preview surfaces stay lightweight and static. Only the animated call hero
+            // actively prepares layered assets; previews can still reuse any shared cache.
+            if presentation.prefersContinuousAnimation {
+                await portraitRuntime.prepareIfNeeded(bundle: presentation.characterBundle)
+            }
+        }
+        .onAppear {
+            speechDriver.update(
+                state: speechInput.sourceState,
+                audioLevel: speechInput.sourceAudioLevel,
+                lipSyncFrame: speechInput.sourceLipSyncFrame,
+                prefersContinuousAnimation: speechInput.prefersContinuousAnimation
+            )
+        }
+        .onChange(of: speechInput) { _, newValue in
+            speechDriver.update(
+                state: newValue.sourceState,
+                audioLevel: newValue.sourceAudioLevel,
+                lipSyncFrame: newValue.sourceLipSyncFrame,
+                prefersContinuousAnimation: newValue.prefersContinuousAnimation
+            )
         }
     }
 
     private var badgeText: String? {
-        switch state {
+        switch speechDriver.output.avatarState {
         case .interrupted:
             return "Interrupted"
         case .error:
@@ -85,15 +381,157 @@ struct CharacterStageView: View {
             return nil
         }
     }
+
+    @ViewBuilder
+    private func renderedStage(size: CGSize, date: Date) -> some View {
+        let metrics = CharacterStageMetrics(size: size, emphasis: emphasis)
+        let palette = PhotoStagePalette.forScene(
+            presentation.scene,
+            characterID: presentation.character.id,
+            visualStyle: presentation.continuitySnapshot.visualStyle
+        )
+        let pose = CharacterStagePose(
+            time: date.timeIntervalSinceReferenceDate,
+            state: speechDriver.output.avatarState,
+            audioLevel: speechDriver.output.audioLevel,
+            lipSyncFrame: speechDriver.output.lipSyncFrame
+        )
+        let portraitProfile = usesPhotoRuntime ? presentation.portraitProfile : nil
+        let cachedPreparedSnapshot = usesPhotoRuntime
+            ? PortraitCharacterRuntime.cachedPreparedSnapshot(for: presentation.characterBundle)
+            : nil
+        let preparedRendererAllowed = lockedPreparedAvailability ?? (cachedPreparedSnapshot != nil)
+        let portraitImage = usesPhotoRuntime
+            ? (portraitRuntime.image ?? PortraitCharacterRuntime.previewImage(for: presentation.characterBundle))
+            : nil
+        let preparedImages = usesPhotoRuntime && preparedRendererAllowed
+            ? (portraitRuntime.preparedImages ?? cachedPreparedSnapshot?.preparedImages)
+            : nil
+        let derivedAssets = usesPhotoRuntime && preparedRendererAllowed
+            ? (portraitRuntime.derivedAssets ?? cachedPreparedSnapshot?.derivedAssets)
+            : nil
+        let focusCrop = derivedAssets?.focusCrop
+            ?? (usesPhotoRuntime ? portraitRuntime.focusCrop : CGRect(x: 0.20, y: 0.10, width: 0.60, height: 0.74))
+        let effectivePreparationState = usesPhotoRuntime && derivedAssets != nil
+            ? PortraitPreparationState.ready
+            : portraitRuntime.preparationState
+        let prefersStaticPreparingCard = performanceGovernor.profile.prefersStaticPreparingCard
+        let reducesBackdropEffects = performanceGovernor.profile.reducesBackdropEffects
+
+        ZStack {
+            if presentation.shouldShowBackdrop {
+                PhotoSceneBackdrop(
+                    image: preparedImages?.backgroundPlate ?? portraitImage,
+                    scene: presentation.scene,
+                    palette: palette,
+                    metrics: metrics,
+                    pose: pose,
+                    reduceEffects: reducesBackdropEffects
+                )
+            }
+
+            if isCallHeroSurface, let preparedImages, let derivedAssets {
+                PreparedPhotoPseudo3DPortrait(
+                    images: preparedImages,
+                    derivedAssets: derivedAssets,
+                    scene: presentation.scene,
+                    palette: palette,
+                    pose: pose,
+                    metrics: metrics,
+                    state: speechDriver.output.avatarState
+                )
+                    .scaleEffect(metrics.scale, anchor: .center)
+                    .offset(y: metrics.verticalOffset)
+            } else if let image = portraitImage {
+                if isCallHeroSurface == false {
+                    StaticPhotoPortraitCard(
+                        image: image,
+                        portraitProfile: portraitProfile,
+                        focusRect: focusCrop,
+                        palette: palette,
+                        pose: pose,
+                        metrics: metrics,
+                        state: speechDriver.output.avatarState
+                    )
+                        .scaleEffect(metrics.scale, anchor: .center)
+                        .offset(y: metrics.verticalOffset)
+                } else if case .failed = effectivePreparationState {
+                    StaticPhotoPortraitCard(
+                        image: image,
+                        portraitProfile: portraitProfile,
+                        focusRect: focusCrop,
+                        palette: palette,
+                        pose: pose,
+                        metrics: metrics,
+                        state: speechDriver.output.avatarState
+                    )
+                        .scaleEffect(metrics.scale, anchor: .center)
+                        .offset(y: metrics.verticalOffset)
+                } else if prefersStaticPreparingCard, effectivePreparationState != .ready {
+                    StaticPhotoPortraitCard(
+                        image: image,
+                        portraitProfile: portraitProfile,
+                        focusRect: focusCrop,
+                        palette: palette,
+                        pose: pose,
+                        metrics: metrics,
+                        state: speechDriver.output.avatarState
+                    )
+                        .scaleEffect(metrics.scale, anchor: .center)
+                        .offset(y: metrics.verticalOffset)
+                } else {
+                    PhotoPseudo3DPortrait(
+                        image: image,
+                        portraitProfile: portraitProfile,
+                        focusRect: focusCrop,
+                        scene: presentation.scene,
+                        palette: palette,
+                        pose: pose,
+                        metrics: metrics,
+                        state: speechDriver.output.avatarState
+                    )
+                        .scaleEffect(metrics.scale, anchor: .center)
+                        .offset(y: metrics.verticalOffset)
+                }
+            } else {
+                PhotoFallbackStage(
+                    characterID: presentation.character.id,
+                    palette: palette,
+                    metrics: metrics,
+                    pose: pose,
+                    state: speechDriver.output.avatarState
+                )
+                    .scaleEffect(metrics.scale, anchor: .center)
+                    .offset(y: metrics.verticalOffset)
+            }
+
+            if speechDriver.output.avatarState == .thinking {
+                ThinkingHalo(color: palette.accent, metrics: metrics, pose: pose)
+                    .scaleEffect(metrics.scale, anchor: .center)
+                    .offset(y: metrics.verticalOffset)
+            }
+
+            if let badge = badgeText {
+                StageBadge(text: badge, palette: palette)
+                    .padding(.top, emphasis == .hero ? 18 : 12)
+                    .padding(.horizontal, emphasis == .hero ? 18 : 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+        .clipped()
+    }
 }
 
 private struct CharacterStageMetrics {
     let size: CGSize
     let emphasis: AvatarEmphasis
     let canvasSize: CGSize
+    let portraitSize: CGSize
     let scale: CGFloat
     let verticalOffset: CGFloat
     let cornerRadius: CGFloat
+    let portraitCornerRadius: CGFloat
 
     init(size: CGSize, emphasis: AvatarEmphasis) {
         self.size = size
@@ -101,13 +539,23 @@ private struct CharacterStageMetrics {
 
         switch emphasis {
         case .hero:
-            canvasSize = CGSize(width: 320, height: 420)
-            cornerRadius = 36
-            verticalOffset = 10
+            canvasSize = CGSize(width: 340, height: 500)
+            portraitSize = CGSize(width: 270, height: 392)
+            cornerRadius = 46
+            portraitCornerRadius = 42
+            verticalOffset = -2
+        case .preview:
+            canvasSize = CGSize(width: 210, height: 250)
+            portraitSize = CGSize(width: 138, height: 178)
+            cornerRadius = 24
+            portraitCornerRadius = 22
+            verticalOffset = 0
         case .compact:
-            canvasSize = CGSize(width: 240, height: 300)
+            canvasSize = CGSize(width: 250, height: 320)
+            portraitSize = CGSize(width: 166, height: 214)
             cornerRadius = 28
-            verticalOffset = 4
+            portraitCornerRadius = 24
+            verticalOffset = 2
         }
 
         scale = min(size.width / canvasSize.width, size.height / canvasSize.height)
@@ -116,337 +564,960 @@ private struct CharacterStageMetrics {
 
 private struct CharacterStagePose {
     let breathing: CGFloat
-    let bodyFloat: CGFloat
-    let shoulderLift: CGFloat
-    let headOffsetX: CGFloat
-    let headOffsetY: CGFloat
-    let headTilt: Angle
+    let swayX: CGFloat
+    let swayY: CGFloat
+    let tilt: Angle
+    let perspectiveX: CGFloat
+    let perspectiveY: CGFloat
+    let mouthPulse: CGFloat
+    let glow: CGFloat
+    let shimmer: CGFloat
+    let blink: CGFloat
     let gazeX: CGFloat
     let gazeY: CGFloat
-    let blinkAmount: CGFloat
-    let mouthOpen: CGFloat
-    let smileCurve: CGFloat
-    let auraPulse: CGFloat
-    let attentionLift: CGFloat
-    let browLift: CGFloat
+    let smile: CGFloat
 
-    init(time: TimeInterval, state: AvatarState, audioLevel: Double, lipSyncStyle: String) {
-        let cycle = CGFloat(time)
-        let clampedAudio = max(0, min(CGFloat(audioLevel), 1))
-        let breathingWave = sin(cycle * 1.3)
-        let bodyFloatWave = sin(cycle * 0.85)
-        let blink = max(
-            Self.blinkPulse(time: cycle, period: 3.1, width: 0.08, offset: 0.32),
-            Self.blinkPulse(time: cycle, period: 4.7, width: 0.07, offset: 1.18)
-        )
-        let idleGazeX = sin(cycle * 0.42) * 3.2
-        let idleGazeY = cos(cycle * 0.31) * 1.8
-        let speechCadence = (sin(cycle * 18.0) + 1) * 0.5
+    init(time: TimeInterval, state: AvatarState, audioLevel: Double, lipSyncFrame: LipSyncFrame) {
+        let t = CGFloat(time)
+        let audio = max(0, min(CGFloat(audioLevel), 1))
+        let breathingWave = sin(t * 1.2)
+        let idleDrift = sin(t * 0.65)
+        let verticalDrift = cos(t * 0.53)
+        let speechCadence = (sin(t * 17.0) + 1) * 0.5
+        let blinkDriver = sin(t * 0.84 + 0.7)
+        let lipOpenness = max(0, min(CGFloat(lipSyncFrame.openness), 1))
+        let lipWidth = max(0, min(CGFloat(lipSyncFrame.width), 1))
+        let jawOffset = max(0, min(CGFloat(lipSyncFrame.jawOffset), 1))
+        let cheekLift = max(0, min(CGFloat(lipSyncFrame.cheekLift), 1))
 
-        var stateHeadX: CGFloat = 0
-        var stateHeadY: CGFloat = 0
-        var stateTilt: CGFloat = sin(cycle * 0.55) * 1.6
-        var stateGazeX: CGFloat = idleGazeX
-        var stateGazeY: CGFloat = idleGazeY
-        var mouthBase: CGFloat = 0.08
-        var mouthRange: CGFloat = 0.06
-        var smile: CGFloat = 0.14
-        var aura: CGFloat = 0.16
-        var attention: CGFloat = 0
-        var brow: CGFloat = 0
+        var swayX = idleDrift * 5
+        var swayY = verticalDrift * 4
+        var tilt = Angle.degrees(Double(sin(t * 0.55) * 1.8))
+        var perspectiveX = idleDrift * 3.4
+        var perspectiveY = verticalDrift * 2.2
+        var mouthPulse = max(audio, max(lipOpenness, CGFloat(speechCadence) * 0.12))
+        var glow: CGFloat = 0.16
+        var shimmer: CGFloat = (sin(t * 0.8) + 1) * 0.5
+        var blink: CGFloat = 1.0
+        var gazeX = idleDrift * 2.2
+        var gazeY = verticalDrift * 1.3
+        var smile: CGFloat = 0.20 + cheekLift * 0.14
 
         switch state {
         case .idle:
-            stateHeadY = breathingWave * -1.4
+            break
         case .listening:
-            stateHeadY = -6 + breathingWave * -1.6
-            stateTilt -= 2.8
-            stateGazeY = -3.2
-            smile = 0.2
-            attention = 6
-            brow = 1.5
+            swayY -= 7
+            tilt = .degrees(-2.6)
+            perspectiveY = -4
+            glow = 0.22
+            gazeX = -2.6
+            gazeY = -1.4
+            smile = 0.28
         case .thinking:
-            stateHeadX = 5
-            stateHeadY = -3
-            stateTilt += 4.5
-            stateGazeX = 9
-            stateGazeY = -8
-            mouthBase = 0.05
-            mouthRange = 0.03
-            smile = 0.04
-            aura = 0.26
-            attention = 10
-            brow = 2.4
+            swayX += 8
+            swayY -= 4
+            tilt = .degrees(4.8)
+            perspectiveX += 7
+            perspectiveY -= 6
+            glow = 0.28
+            gazeX = 3.4
+            gazeY = -2.2
+            smile = 0.12
         case .speaking:
-            stateHeadY = -3 + sin(cycle * 3.5) * 1.8
-            stateTilt += sin(cycle * 2.9) * 2.4
-            stateGazeX = idleGazeX * 0.5
-            stateGazeY = -1
-            mouthBase = 0.18
-            mouthRange = lipSyncStyle == "wide-bright" ? 0.42 : (lipSyncStyle == "narrow-precise" ? 0.28 : 0.34)
-            smile = 0.18
-            aura = 0.34
-            attention = 7
-            brow = 1.2
+            swayY -= 3
+            tilt = .degrees(Double(sin(t * 2.1) * 2.8))
+            perspectiveX *= 0.7
+            perspectiveY = -1.4
+            mouthPulse = max(audio, max(lipOpenness * 1.05, CGFloat(speechCadence) * 0.9))
+            glow = 0.32
+            shimmer = (sin(t * 2.6) + 1) * 0.5
+            gazeX *= 0.7 + lipWidth * 0.05
+            gazeY = -0.3
+            smile = 0.24 + cheekLift * 0.30
         case .interrupted:
-            stateHeadX = -4
-            stateHeadY = -2
-            stateTilt -= 6.5
-            stateGazeX = -5
-            stateGazeY = -1
-            mouthBase = 0.11
-            mouthRange = 0.09
-            smile = -0.02
-            aura = 0.2
-            attention = 4
+            swayX -= 5
+            tilt = .degrees(-5.2)
+            perspectiveX = -5.5
+            perspectiveY = -0.8
+            mouthPulse = max(0.04, lipOpenness * 0.3)
+            glow = 0.18
+            gazeX = -4
+            gazeY = 0.4
+            smile = 0.06
         case .error:
-            stateHeadY = 1
-            stateTilt = -1.2
-            stateGazeX = 0
-            stateGazeY = 1
-            mouthBase = 0.04
-            mouthRange = 0.02
-            smile = -0.08
-            aura = 0.12
-            attention = 0
-            brow = -1.4
+            swayX = 0
+            swayY = 2
+            tilt = .degrees(-0.8)
+            perspectiveX = 0
+            perspectiveY = 1
+            mouthPulse = 0.03
+            glow = 0.12
+            gazeX = 0
+            gazeY = 1.4
+            smile = 0.02
+        }
+
+        if blinkDriver > 0.92 {
+            blink = 0.16
+        }
+        if blinkDriver > 0.985 {
+            blink = 0.04
         }
 
         breathing = breathingWave
-        bodyFloat = bodyFloatWave * 2.4
-        shoulderLift = breathingWave * 3.8
-        headOffsetX = stateHeadX + sin(cycle * 0.92) * 1.5
-        headOffsetY = stateHeadY + breathingWave * -2.1
-        headTilt = .degrees(stateTilt)
-        gazeX = stateGazeX
-        gazeY = stateGazeY
-        blinkAmount = blink
-        mouthOpen = max(0.02, mouthBase + mouthRange * max(clampedAudio, CGFloat(speechCadence) * (state == .speaking ? 0.9 : 0.18)))
-        smileCurve = smile
-        auraPulse = aura + sin(cycle * 1.8) * 0.04
-        attentionLift = attention + sin(cycle * 1.4) * 1.6
-        browLift = brow
-    }
-
-    private static func blinkPulse(time: CGFloat, period: CGFloat, width: CGFloat, offset: CGFloat) -> CGFloat {
-        let t = (time + offset).truncatingRemainder(dividingBy: period)
-        let distance = min(t, period - t)
-        guard distance < width else { return 0 }
-        let normalized = 1 - (distance / width)
-        return normalized * normalized
+        self.swayX = swayX
+        self.swayY = swayY - breathingWave * 2.4 + jawOffset * 0.8
+        self.tilt = tilt
+        self.perspectiveX = perspectiveX
+        self.perspectiveY = perspectiveY
+        self.mouthPulse = mouthPulse
+        self.glow = glow + sin(t * 1.6) * 0.03
+        self.shimmer = shimmer
+        self.blink = blink
+        self.gazeX = gazeX
+        self.gazeY = gazeY
+        self.smile = smile
     }
 }
 
-private struct CharacterStagePalette {
-    let skinLight: Color
-    let skinMid: Color
-    let skinShadow: Color
-    let hairPrimary: Color
-    let hairSecondary: Color
-    let outfitPrimary: Color
-    let outfitSecondary: Color
+private struct PhotoStagePalette {
+    let top: Color
+    let bottom: Color
+    let ambient: Color
     let accent: Color
-    let ambientGlow: Color
-    let lip: Color
-    let iris: Color
-    let shadow: Color
+    let frame: Color
+    let frameShadow: Color
+    let backdropImageOpacity: Double
+    let backdropBlur: CGFloat
+    let portraitSaturation: Double
+    let portraitContrast: Double
+    let highlightOpacity: Double
+    let shadowOpacity: Double
+    let glowMultiplier: CGFloat
 
-    static func palette(for characterID: String) -> CharacterStagePalette {
-        switch characterID {
-        case "lyra":
-            return CharacterStagePalette(
-                skinLight: Color(red: 0.98, green: 0.88, blue: 0.79),
-                skinMid: Color(red: 0.93, green: 0.75, blue: 0.67),
-                skinShadow: Color(red: 0.77, green: 0.57, blue: 0.52),
-                hairPrimary: Color(red: 0.18, green: 0.16, blue: 0.23),
-                hairSecondary: Color(red: 0.31, green: 0.27, blue: 0.39),
-                outfitPrimary: Color(red: 0.25, green: 0.29, blue: 0.45),
-                outfitSecondary: Color(red: 0.14, green: 0.18, blue: 0.29),
-                accent: Color(red: 0.54, green: 0.71, blue: 0.95),
-                ambientGlow: Color(red: 0.70, green: 0.79, blue: 1.0),
-                lip: Color(red: 0.76, green: 0.42, blue: 0.49),
-                iris: Color(red: 0.34, green: 0.48, blue: 0.75),
-                shadow: Color.black.opacity(0.28)
+    static func forScene(_ scene: CharacterScene, characterID: String, visualStyle: VideoCallVisualStyle) -> PhotoStagePalette {
+        switch (scene.id, visualStyle) {
+        case ("study", .cinematic):
+            return PhotoStagePalette(
+                top: Color(red: 0.09, green: 0.10, blue: 0.14),
+                bottom: Color(red: 0.18, green: 0.15, blue: 0.14),
+                ambient: Color(red: 0.72, green: 0.66, blue: 0.56),
+                accent: Color(red: 0.83, green: 0.58, blue: 0.36),
+                frame: Color.white.opacity(0.12),
+                frameShadow: Color.black.opacity(0.36),
+                backdropImageOpacity: 0.76,
+                backdropBlur: 18,
+                portraitSaturation: 1.02,
+                portraitContrast: 1.16,
+                highlightOpacity: 0.12,
+                shadowOpacity: 0.30,
+                glowMultiplier: 0.82
             )
-        case "sol":
-            return CharacterStagePalette(
-                skinLight: Color(red: 0.90, green: 0.71, blue: 0.55),
-                skinMid: Color(red: 0.77, green: 0.55, blue: 0.41),
-                skinShadow: Color(red: 0.55, green: 0.36, blue: 0.28),
-                hairPrimary: Color(red: 0.11, green: 0.10, blue: 0.12),
-                hairSecondary: Color(red: 0.25, green: 0.21, blue: 0.20),
-                outfitPrimary: Color(red: 0.17, green: 0.32, blue: 0.32),
-                outfitSecondary: Color(red: 0.09, green: 0.16, blue: 0.15),
-                accent: Color(red: 0.96, green: 0.62, blue: 0.28),
-                ambientGlow: Color(red: 1.0, green: 0.72, blue: 0.34),
-                lip: Color(red: 0.60, green: 0.24, blue: 0.23),
-                iris: Color(red: 0.27, green: 0.22, blue: 0.16),
-                shadow: Color.black.opacity(0.30)
+        case ("study", .softFocus):
+            return PhotoStagePalette(
+                top: Color(red: 0.18, green: 0.17, blue: 0.18),
+                bottom: Color(red: 0.30, green: 0.25, blue: 0.22),
+                ambient: Color(red: 0.95, green: 0.84, blue: 0.74),
+                accent: Color(red: 0.92, green: 0.70, blue: 0.52),
+                frame: Color.white.opacity(0.18),
+                frameShadow: Color.black.opacity(0.16),
+                backdropImageOpacity: 0.62,
+                backdropBlur: 30,
+                portraitSaturation: 1.10,
+                portraitContrast: 1.00,
+                highlightOpacity: 0.24,
+                shadowOpacity: 0.16,
+                glowMultiplier: 1.24
+            )
+        case ("study", _):
+            return PhotoStagePalette(
+                top: Color(red: 0.13, green: 0.14, blue: 0.18),
+                bottom: Color(red: 0.22, green: 0.20, blue: 0.18),
+                ambient: Color(red: 0.80, green: 0.76, blue: 0.66),
+                accent: Color(red: 0.80, green: 0.63, blue: 0.42),
+                frame: Color.white.opacity(0.18),
+                frameShadow: Color.black.opacity(0.28),
+                backdropImageOpacity: 0.58,
+                backdropBlur: 24,
+                portraitSaturation: 1.06,
+                portraitContrast: 1.06,
+                highlightOpacity: 0.18,
+                shadowOpacity: 0.22,
+                glowMultiplier: 1.0
+            )
+        case ("nightcity", .cinematic):
+            return PhotoStagePalette(
+                top: Color(red: 0.05, green: 0.07, blue: 0.15),
+                bottom: Color(red: 0.10, green: 0.06, blue: 0.15),
+                ambient: Color(red: 0.41, green: 0.58, blue: 0.94),
+                accent: Color(red: 0.99, green: 0.62, blue: 0.31),
+                frame: Color.white.opacity(0.10),
+                frameShadow: Color.black.opacity(0.40),
+                backdropImageOpacity: 0.82,
+                backdropBlur: 16,
+                portraitSaturation: 1.00,
+                portraitContrast: 1.18,
+                highlightOpacity: 0.11,
+                shadowOpacity: 0.32,
+                glowMultiplier: 0.78
+            )
+        case ("nightcity", .softFocus):
+            return PhotoStagePalette(
+                top: Color(red: 0.11, green: 0.12, blue: 0.20),
+                bottom: Color(red: 0.18, green: 0.12, blue: 0.20),
+                ambient: Color(red: 0.67, green: 0.76, blue: 0.98),
+                accent: Color(red: 0.98, green: 0.73, blue: 0.46),
+                frame: Color.white.opacity(0.17),
+                frameShadow: Color.black.opacity(0.18),
+                backdropImageOpacity: 0.66,
+                backdropBlur: 28,
+                portraitSaturation: 1.08,
+                portraitContrast: 1.00,
+                highlightOpacity: 0.22,
+                shadowOpacity: 0.18,
+                glowMultiplier: 1.20
+            )
+        case ("nightcity", _):
+            return PhotoStagePalette(
+                top: Color(red: 0.08, green: 0.10, blue: 0.18),
+                bottom: Color(red: 0.12, green: 0.09, blue: 0.16),
+                ambient: Color(red: 0.47, green: 0.64, blue: 0.95),
+                accent: Color(red: 0.97, green: 0.67, blue: 0.36),
+                frame: Color.white.opacity(0.16),
+                frameShadow: Color.black.opacity(0.32),
+                backdropImageOpacity: 0.60,
+                backdropBlur: 24,
+                portraitSaturation: 1.06,
+                portraitContrast: 1.08,
+                highlightOpacity: 0.17,
+                shadowOpacity: 0.24,
+                glowMultiplier: 1.0
+            )
+        case (_, .cinematic):
+            return PhotoStagePalette(
+                top: Color(red: 0.08, green: 0.10, blue: 0.16),
+                bottom: Color(red: 0.18, green: 0.12, blue: 0.12),
+                ambient: Color(red: 0.92, green: 0.72, blue: 0.49),
+                accent: Color(red: 0.95, green: 0.60, blue: 0.34),
+                frame: Color.white.opacity(0.12),
+                frameShadow: Color.black.opacity(0.38),
+                backdropImageOpacity: 0.78,
+                backdropBlur: 18,
+                portraitSaturation: 1.00,
+                portraitContrast: 1.18,
+                highlightOpacity: 0.12,
+                shadowOpacity: 0.30,
+                glowMultiplier: 0.84
+            )
+        case (_, .softFocus):
+            return PhotoStagePalette(
+                top: Color(red: 0.18, green: 0.19, blue: 0.24),
+                bottom: Color(red: 0.34, green: 0.22, blue: 0.18),
+                ambient: Color(red: 1.00, green: 0.84, blue: 0.66),
+                accent: Color(red: 1.0, green: 0.76, blue: 0.58),
+                frame: Color.white.opacity(0.18),
+                frameShadow: Color.black.opacity(0.18),
+                backdropImageOpacity: 0.64,
+                backdropBlur: 30,
+                portraitSaturation: 1.10,
+                portraitContrast: 1.00,
+                highlightOpacity: 0.24,
+                shadowOpacity: 0.18,
+                glowMultiplier: 1.24
             )
         default:
-            return CharacterStagePalette(
-                skinLight: Color(red: 1.0, green: 0.89, blue: 0.78),
-                skinMid: Color(red: 0.98, green: 0.76, blue: 0.66),
-                skinShadow: Color(red: 0.81, green: 0.58, blue: 0.50),
-                hairPrimary: Color(red: 0.17, green: 0.12, blue: 0.15),
-                hairSecondary: Color(red: 0.34, green: 0.19, blue: 0.24),
-                outfitPrimary: Color(red: 0.22, green: 0.28, blue: 0.43),
-                outfitSecondary: Color(red: 0.47, green: 0.22, blue: 0.19),
-                accent: Color(red: 0.99, green: 0.62, blue: 0.42),
-                ambientGlow: Color(red: 1.0, green: 0.78, blue: 0.56),
-                lip: Color(red: 0.77, green: 0.28, blue: 0.34),
-                iris: Color(red: 0.24, green: 0.29, blue: 0.41),
-                shadow: Color.black.opacity(0.28)
+            return PhotoStagePalette(
+                top: Color(red: 0.12, green: 0.15, blue: 0.21),
+                bottom: Color(red: 0.22, green: 0.17, blue: 0.16),
+                ambient: Color(red: 0.98, green: 0.80, blue: 0.58),
+                accent: Color(red: 1.0, green: 0.69, blue: 0.47),
+                frame: Color.white.opacity(0.18),
+                frameShadow: Color.black.opacity(0.30),
+                backdropImageOpacity: 0.60,
+                backdropBlur: 24,
+                portraitSaturation: 1.06,
+                portraitContrast: 1.06,
+                highlightOpacity: 0.18,
+                shadowOpacity: 0.22,
+                glowMultiplier: 1.0
             )
         }
     }
 }
 
-private enum CharacterLook {
-    case nova
-    case lyra
-    case sol
-
-    init(characterID: String) {
-        switch characterID {
-        case "lyra":
-            self = .lyra
-        case "sol":
-            self = .sol
-        default:
-            self = .nova
-        }
-    }
-}
-
-private struct CharacterStageBackground: View {
+private struct PreparedPhotoPseudo3DPortrait: View {
+    let images: PortraitPreparedImages
+    let derivedAssets: PortraitDerivedAssets
     let scene: CharacterScene
-    let palette: CharacterStagePalette
+    let palette: PhotoStagePalette
+    let pose: CharacterStagePose
     let metrics: CharacterStageMetrics
     let state: AvatarState
+
+    private var portraitShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: metrics.portraitCornerRadius, style: .continuous)
+    }
+
+    private struct PlatePlacement {
+        let xShift: CGFloat
+        let yShift: CGFloat
+        let extraScale: CGFloat
+    }
+
+    private var tuning: PortraitParallaxTuning {
+        derivedAssets.parallaxTuning
+    }
+
+    private var isHero: Bool {
+        metrics.emphasis == .hero
+    }
+
+    private var motionDamping: CGFloat {
+        derivedAssets.motionPreset.contains("natural") ? 0.86 : 1.0
+    }
+
+    private var keylightTint: Color {
+        derivedAssets.lightingPreset.contains("daylight")
+            ? Color(red: 1.00, green: 0.97, blue: 0.92)
+            : Color.white
+    }
+
+    private var shadowTint: Color {
+        derivedAssets.lightingPreset.contains("daylight")
+            ? Color(red: 0.20, green: 0.14, blue: 0.12)
+            : Color.black
+    }
+
+    private var torsoPlacement: PlatePlacement {
+        PlatePlacement(
+            xShift: (-pose.perspectiveX * 1.15 * tuning.torsoDrift - pose.gazeX * 0.10) * motionDamping,
+            yShift: (isHero ? 10 : 8) + (pose.perspectiveY * 0.42 + pose.breathing * 0.78) * motionDamping,
+            extraScale: isHero ? 0.05 : 0.08
+        )
+    }
+
+    private var headPlacement: PlatePlacement {
+        PlatePlacement(
+            xShift: ((pose.perspectiveX * 0.92) + (pose.gazeX * 0.18)) * tuning.headDrift * motionDamping,
+            yShift: (pose.perspectiveY * 0.46 - pose.breathing * 0.14) * motionDamping,
+            extraScale: isHero ? 0.06 : 0.08
+        )
+    }
+
+    private var detailPlacement: PlatePlacement {
+        PlatePlacement(
+            xShift: headPlacement.xShift * 1.02,
+            yShift: headPlacement.yShift * 1.04,
+            extraScale: headPlacement.extraScale
+        )
+    }
+
+    private var mouthPlacement: PlatePlacement {
+        PlatePlacement(
+            xShift: headPlacement.xShift * 0.98 + pose.gazeX * 0.04,
+            yShift: headPlacement.yShift + pose.mouthPulse * 1.08 * tuning.mouthDepth,
+            extraScale: headPlacement.extraScale
+        )
+    }
+
+    private var eyePlacement: PlatePlacement {
+        PlatePlacement(
+            xShift: headPlacement.xShift * 0.94 + pose.gazeX * 0.08 * tuning.blinkDepth,
+            yShift: headPlacement.yShift * 0.92 + pose.gazeY * 0.08 * tuning.blinkDepth,
+            extraScale: headPlacement.extraScale
+        )
+    }
+
+    var body: some View {
+        Group {
+            if isHero {
+                heroPortrait
+            } else {
+                compactPortrait
+            }
+        }
+    }
+
+    private var compactPortrait: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: metrics.portraitCornerRadius + 8, style: .continuous)
+                .fill(Color.black.opacity(0.18))
+                .frame(width: metrics.portraitSize.width + 18, height: metrics.portraitSize.height + 20)
+                .blur(radius: 10)
+                .offset(x: pose.swayX * 0.50, y: 24)
+
+            portraitCard
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY)), axis: (x: 1, y: 0, z: 0), perspective: 0.75)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX)), axis: (x: 0, y: 1, z: 0), perspective: 0.75)
+                .rotationEffect(pose.tilt)
+                .offset(x: pose.swayX, y: pose.swayY + pose.breathing * 1.3)
+
+            glassReflection
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY)), axis: (x: 1, y: 0, z: 0), perspective: 0.75)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX)), axis: (x: 0, y: 1, z: 0), perspective: 0.75)
+                .rotationEffect(pose.tilt)
+                .offset(x: pose.swayX, y: pose.swayY + pose.breathing * 1.3)
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var heroPortrait: some View {
+        ZStack {
+            Ellipse()
+                .fill(Color.black.opacity(0.20))
+                .frame(width: metrics.portraitSize.width * 0.72, height: 44)
+                .blur(radius: 20)
+                .offset(y: metrics.portraitSize.height * 0.47)
+
+            portraitCard
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY * 0.58)), axis: (x: 1, y: 0, z: 0), perspective: 0.82)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX * 0.76)), axis: (x: 0, y: 1, z: 0), perspective: 0.82)
+                .rotationEffect(.degrees(pose.tilt.degrees * 0.42))
+                .offset(x: pose.swayX * 0.68, y: pose.swayY * 0.54 + pose.breathing * 1.1)
+        }
+    }
+
+    private var portraitCard: some View {
+        ZStack {
+            portraitShape
+                .fill(Color.black.opacity(isHero ? 0.08 : 0.16))
+
+            ZStack {
+                plateImage(images.torsoPlate, opacity: isHero ? 0.76 : 0.84, placement: torsoPlacement)
+                plateImage(images.headPlate, opacity: 1.0, placement: headPlacement)
+                plateImage(images.faceDetailOverlay, opacity: isHero ? 0.24 : 0.20, placement: detailPlacement)
+                    .blendMode(.screen)
+
+                facialDepthLayer
+                mouthMotionLayer
+                cheekMotionLayer
+                blinkShadowLayer
+                eyeCatchlightLayer
+                portraitLighting
+
+                LinearGradient(
+                    colors: [
+                        keylightTint.opacity(isHero ? 0.08 : 0.05),
+                        .clear,
+                        shadowTint.opacity(0.14)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                if isHero {
+                    Rectangle()
+                        .fill(keylightTint.opacity(0.10))
+                        .frame(width: metrics.portraitSize.width * 0.18)
+                        .blur(radius: 18)
+                        .rotationEffect(.degrees(-17))
+                        .offset(x: metrics.portraitSize.width * 0.18, y: -metrics.portraitSize.height * 0.18)
+                        .clipShape(portraitShape)
+                        .blendMode(.screen)
+                }
+            }
+            .clipShape(portraitShape)
+
+            portraitShape
+                .stroke(isHero ? Color.white.opacity(0.14) : palette.frame, lineWidth: 1)
+                .shadow(color: palette.frameShadow, radius: 26, y: 18)
+
+            portraitShape
+                .stroke(Color.white.opacity(0.06), lineWidth: 6)
+                .blur(radius: 12)
+                .opacity(0.62)
+        }
+    }
+
+    private func plateImage(
+        _ image: UIImage,
+        opacity: Double,
+        placement: PlatePlacement
+    ) -> some View {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.90 : 1.12) + placement.extraScale
+        let focusX = ((derivedAssets.focusCrop.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((derivedAssets.focusCrop.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(width: size.width * imageScale, height: size.height * imageScale)
+            .saturation(state == .error ? 0.76 : palette.portraitSaturation)
+            .contrast(palette.portraitContrast)
+            .opacity(opacity)
+            .offset(
+                x: -focusX + placement.xShift,
+                y: -focusY + placement.yShift - size.height * (isHero ? 0.19 : 0.05)
+            )
+    }
+
+    private var facialDepthLayer: some View {
+        ZStack {
+            shadowTint.opacity(state == .speaking ? 0.18 : 0.12)
+                .blur(radius: isHero ? 22 : 14)
+                .offset(x: headPlacement.xShift * 0.14 + 6, y: headPlacement.yShift + (isHero ? 12 : 8))
+                .mask(plateImage(images.headPlate, opacity: 1, placement: headPlacement))
+                .blendMode(.multiply)
+
+            RadialGradient(
+                colors: [
+                    keylightTint.opacity(0.14 + Double(pose.shimmer) * 0.06),
+                    .clear
+                ],
+                center: UnitPoint(
+                    x: derivedAssets.headAnchor.x + pose.gazeX * 0.002,
+                    y: max(0.16, derivedAssets.headAnchor.y + 0.02)
+                ),
+                startRadius: 4,
+                endRadius: metrics.portraitSize.width * (isHero ? 0.30 : 0.24)
+            )
+            .mask(plateImage(images.faceDetailOverlay, opacity: 1, placement: detailPlacement))
+            .blendMode(.screen)
+        }
+    }
+
+    private var mouthMotionLayer: some View {
+        plateImage(
+            images.headPlate,
+            opacity: state == .speaking ? 0.30 : 0.10,
+            placement: mouthPlacement
+        )
+        .scaleEffect(
+            x: 1 + pose.mouthPulse * 0.010 * tuning.mouthDepth,
+            y: 1 + pose.mouthPulse * 0.060 * tuning.mouthDepth,
+            anchor: UnitPoint(x: derivedAssets.mouthRect.midX, y: max(0.02, derivedAssets.mouthRect.minY - 0.02))
+        )
+        .mask(
+            plateImage(
+                images.mouthMask,
+                opacity: 1,
+                placement: PlatePlacement(
+                    xShift: mouthPlacement.xShift,
+                    yShift: mouthPlacement.yShift,
+                    extraScale: mouthPlacement.extraScale
+                )
+            )
+        )
+    }
+
+    private var cheekMotionLayer: some View {
+        plateImage(
+            images.faceDetailOverlay,
+            opacity: state == .speaking ? 0.16 : 0.05,
+            placement: PlatePlacement(
+                xShift: detailPlacement.xShift,
+                yShift: detailPlacement.yShift + pose.mouthPulse * 0.34,
+                extraScale: detailPlacement.extraScale
+            )
+        )
+        .scaleEffect(
+            x: 1 + pose.mouthPulse * 0.004,
+            y: 1 + pose.mouthPulse * 0.016,
+            anchor: UnitPoint(x: derivedAssets.mouthRect.midX, y: max(0.04, derivedAssets.mouthRect.minY - 0.12))
+        )
+        .mask(plateImage(images.featheredMatte, opacity: 1, placement: detailPlacement))
+        .blendMode(.overlay)
+    }
+
+    private var blinkShadowLayer: some View {
+        plateImage(
+            images.eyeMask,
+            opacity: Double((1 - pose.blink) * 0.42),
+            placement: eyePlacement
+        )
+        .colorMultiply(.black)
+        .blendMode(.multiply)
+    }
+
+    private var eyeCatchlightLayer: some View {
+        ZStack {
+            ForEach(Array(derivedAssets.eyeAnchors.enumerated()), id: \.offset) { index, eyeAnchor in
+                let point = pointInCard(for: eyeAnchor, placement: headPlacement)
+
+                Circle()
+                    .fill(keylightTint.opacity(pose.blink > 0.14 ? 0.80 : 0.18))
+                    .frame(width: isHero ? 7 : 5, height: isHero ? 7 : 5)
+                    .blur(radius: isHero ? 0.9 : 0.6)
+                    .offset(
+                        x: point.x - metrics.portraitSize.width / 2 + pose.gazeX * 0.10 + (index == 0 ? -1.5 : 1.2),
+                        y: point.y - metrics.portraitSize.height / 2 + pose.gazeY * 0.06 - (isHero ? 1.8 : 1.1)
+                    )
+            }
+        }
+        .blendMode(.screen)
+        .opacity(state == .error ? 0.20 : 1.0)
+    }
+
+    private var portraitLighting: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    keylightTint.opacity(palette.highlightOpacity * pose.shimmer),
+                    .clear,
+                    shadowTint.opacity(0.18)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [palette.ambient.opacity(Double(pose.glow * palette.glowMultiplier) * 0.55), .clear],
+                center: UnitPoint(
+                    x: 0.48 + pose.perspectiveX * 0.01,
+                    y: 0.28 + pose.perspectiveY * 0.01
+                ),
+                startRadius: 8,
+                endRadius: metrics.portraitSize.width * 0.52
+            )
+            .blendMode(.screen)
+
+            LinearGradient(
+                colors: [
+                    .clear,
+                    keylightTint.opacity(isHero ? 0.10 : 0.06),
+                    .clear
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .mask(plateImage(images.featheredMatte, opacity: 1, placement: headPlacement))
+            .offset(x: isHero ? 10 : 6)
+            .blendMode(.screen)
+        }
+    }
+
+    private var glassReflection: some View {
+        portraitShape
+            .fill(
+                LinearGradient(
+                    colors: [
+                        keylightTint.opacity(0.18),
+                        keylightTint.opacity(0.03),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .center
+                )
+            )
+            .overlay(alignment: .topLeading) {
+                Rectangle()
+                    .fill(keylightTint.opacity(0.12))
+                    .frame(width: metrics.portraitSize.width * 0.18)
+                    .blur(radius: 14)
+                    .rotationEffect(.degrees(-18))
+                    .offset(x: metrics.portraitSize.width * 0.06, y: metrics.portraitSize.height * 0.10)
+                    .clipShape(portraitShape)
+            }
+    }
+
+    private func pointInCard(for normalizedPoint: CGPoint, placement: PlatePlacement) -> CGPoint {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.90 : 1.12) + placement.extraScale
+        let focusX = ((derivedAssets.focusCrop.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((derivedAssets.focusCrop.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return CGPoint(
+            x: size.width / 2 + (normalizedPoint.x - 0.5) * size.width * imageScale - focusX + placement.xShift,
+            y: size.height / 2 + (normalizedPoint.y - 0.5) * size.height * imageScale - focusY + placement.yShift - size.height * (isHero ? 0.19 : 0.05)
+        )
+    }
+}
+
+private struct StaticPhotoPortraitCard: View {
+    let image: UIImage
+    let portraitProfile: PortraitRenderProfile?
+    let focusRect: CGRect
+    let palette: PhotoStagePalette
     let pose: CharacterStagePose
+    let metrics: CharacterStageMetrics
+    let state: AvatarState
+
+    private var portraitShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: metrics.portraitCornerRadius, style: .continuous)
+    }
+
+    private var profile: PortraitRenderProfile {
+        portraitProfile ?? CharacterCatalog.primaryPortraitProfile
+    }
+
+    private var isHero: Bool {
+        metrics.emphasis == .hero
+    }
+
+    private var keylightTint: Color {
+        profile.lightingPreset.contains("daylight")
+            ? Color(red: 1.00, green: 0.97, blue: 0.92)
+            : Color.white
+    }
+
+    private var shadowTint: Color {
+        profile.lightingPreset.contains("daylight")
+            ? Color(red: 0.20, green: 0.14, blue: 0.12)
+            : Color.black
+    }
+
+    var body: some View {
+        ZStack {
+            Ellipse()
+                .fill(Color.black.opacity(0.18))
+                .frame(width: metrics.portraitSize.width * 0.68, height: 40)
+                .blur(radius: 18)
+                .offset(y: metrics.portraitSize.height * 0.46)
+
+            portraitShape
+                .fill(Color.black.opacity(0.10))
+                .overlay {
+                    ZStack {
+                        photoLayer(opacity: 1.0, extraScale: isHero ? 0.06 : 0.06)
+                        portraitLight
+                        eyeCatchlightLayer
+                        LinearGradient(
+                            colors: [
+                                keylightTint.opacity(0.08),
+                                .clear,
+                                shadowTint.opacity(0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    }
+                    .clipShape(portraitShape)
+                }
+                .overlay {
+                    portraitShape
+                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                }
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY * 0.35)), axis: (x: 1, y: 0, z: 0), perspective: 0.78)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX * 0.38)), axis: (x: 0, y: 1, z: 0), perspective: 0.78)
+                .rotationEffect(.degrees(pose.tilt.degrees * 0.24))
+                .offset(x: pose.swayX * 0.45, y: pose.swayY * 0.30 + pose.breathing * 0.8)
+        }
+    }
+
+    private func photoLayer(opacity: Double, extraScale: CGFloat) -> some View {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.92 : 1.10) + extraScale
+        let focusX = ((focusRect.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((focusRect.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(width: size.width * imageScale, height: size.height * imageScale)
+            .saturation(state == .error ? 0.78 : palette.portraitSaturation)
+            .contrast(palette.portraitContrast)
+            .opacity(opacity)
+            .offset(
+                x: -focusX,
+                y: -focusY - size.height * (isHero ? 0.19 : 0.05)
+            )
+    }
+
+    private var portraitLight: some View {
+        ZStack {
+            RadialGradient(
+                colors: [
+                    keylightTint.opacity(0.14 + Double(pose.shimmer) * 0.04),
+                    .clear
+                ],
+                center: UnitPoint(x: profile.headAnchor.x, y: max(0.18, profile.headAnchor.y + 0.04)),
+                startRadius: 4,
+                endRadius: metrics.portraitSize.width * (isHero ? 0.28 : 0.22)
+            )
+            .blendMode(.screen)
+
+            LinearGradient(
+                colors: [
+                    .clear,
+                    shadowTint.opacity(0.10),
+                    shadowTint.opacity(0.18)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .blendMode(.multiply)
+        }
+    }
+
+    private var eyeCatchlightLayer: some View {
+        ZStack {
+            ForEach(Array(profile.eyeAnchors.enumerated()), id: \.offset) { index, eyeAnchor in
+                let point = pointInCard(for: eyeAnchor, extraScale: isHero ? 0.06 : 0.06)
+
+                Circle()
+                    .fill(keylightTint.opacity(pose.blink > 0.14 ? 0.72 : 0.16))
+                    .frame(width: isHero ? 6 : 4.5, height: isHero ? 6 : 4.5)
+                    .blur(radius: isHero ? 0.8 : 0.5)
+                    .offset(
+                        x: point.x - metrics.portraitSize.width / 2 + (index == 0 ? -1.0 : 1.0),
+                        y: point.y - metrics.portraitSize.height / 2 - (isHero ? 1.6 : 1.0)
+                    )
+            }
+        }
+        .blendMode(.screen)
+        .opacity(state == .error ? 0.24 : 1.0)
+    }
+
+    private func pointInCard(for normalizedPoint: CGPoint, extraScale: CGFloat) -> CGPoint {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.92 : 1.10) + extraScale
+        let focusX = ((focusRect.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((focusRect.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return CGPoint(
+            x: size.width / 2 + (normalizedPoint.x - 0.5) * size.width * imageScale - focusX,
+            y: size.height / 2 + (normalizedPoint.y - 0.5) * size.height * imageScale - focusY - size.height * (isHero ? 0.19 : 0.05)
+        )
+    }
+}
+
+private struct PhotoSceneBackdrop: View {
+    let image: UIImage?
+    let scene: CharacterScene
+    let palette: PhotoStagePalette
+    let metrics: CharacterStageMetrics
+    let pose: CharacterStagePose
+    let reduceEffects: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous)
+        let isHero = metrics.emphasis == .hero
+        let blurRadius = reduceEffects ? max(6, palette.backdropBlur * 0.33) : palette.backdropBlur + (isHero ? 8 : -4)
+        let backdropOpacity = reduceEffects
+            ? min(0.42, palette.backdropImageOpacity * 0.55)
+            : min(0.9, palette.backdropImageOpacity + (isHero ? 0.08 : -0.02))
 
         ZStack {
             shape
-                .fill(baseGradient)
+                .fill(
+                    LinearGradient(
+                        colors: [palette.top, palette.bottom],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
-            sceneDecor
-                .clipShape(shape)
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: metrics.size.width * (isHero ? 1.28 : 1.16), height: metrics.size.height * (isHero ? 1.28 : 1.16))
+                    .blur(radius: blurRadius)
+                    .saturation(palette.portraitSaturation + (reduceEffects ? 0 : (isHero ? 0.06 : 0.02)))
+                    .opacity(backdropOpacity)
+                    .offset(x: -pose.swayX * (isHero ? 2.2 : 1.6), y: -pose.swayY * (isHero ? 1.8 : 1.2))
+                    .clipped()
+                    .clipShape(shape)
+            }
+
+            if reduceEffects == false {
+                sceneDecor
+                    .clipShape(shape)
+            }
 
             shape
                 .fill(
                     LinearGradient(
                         colors: [
+                            Color.white.opacity(isHero ? 0.08 : 0.06),
                             .clear,
-                            Color.black.opacity(0.12),
-                            Color.black.opacity(0.34)
+                            Color.black.opacity(isHero ? 0.18 : 0.28)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
 
-            shape
-                .strokeBorder(Color.white.opacity(0.16), lineWidth: 1.1)
-
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [
-                            palette.ambientGlow.opacity(state == .error ? 0.18 : Double(pose.auraPulse)),
-                            .clear
-                        ],
+                        colors: [palette.ambient.opacity(Double(pose.glow * palette.glowMultiplier)), .clear],
                         center: .center,
-                        startRadius: 12,
-                        endRadius: metrics.size.width * 0.42
+                        startRadius: 20,
+                        endRadius: metrics.size.width * (isHero ? 0.56 : 0.42)
                     )
                 )
-                .blur(radius: 10)
-                .offset(x: 0, y: -metrics.size.height * 0.05)
+                .frame(width: metrics.size.width, height: metrics.size.height)
+                .blur(radius: reduceEffects ? 12 : (isHero ? 30 : 20))
+                .offset(y: -metrics.size.height * (isHero ? 0.14 : 0.08))
                 .blendMode(.screen)
+                .opacity(reduceEffects ? 0.48 : 1)
 
             Ellipse()
-                .fill(Color.black.opacity(0.16))
-                .frame(width: metrics.size.width * 0.72, height: metrics.size.height * 0.18)
-                .blur(radius: 28)
-                .offset(y: metrics.size.height * 0.34)
-        }
-        .shadow(color: Color.black.opacity(0.16), radius: 24, y: 18)
-    }
+                .fill(Color.black.opacity(palette.shadowOpacity))
+                .frame(width: metrics.size.width * (isHero ? 0.52 : 0.68), height: metrics.size.height * (isHero ? 0.10 : 0.14))
+                .blur(radius: reduceEffects ? 14 : (isHero ? 34 : 24))
+                .offset(y: metrics.size.height * (isHero ? 0.39 : 0.34))
 
-    private var baseGradient: LinearGradient {
-        switch scene.lightingStyle {
-        case "golden":
-            return LinearGradient(
-                colors: [
-                    Color(red: 0.31, green: 0.28, blue: 0.37),
-                    Color(red: 0.63, green: 0.41, blue: 0.28),
-                    Color(red: 0.17, green: 0.14, blue: 0.19)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        case "neon":
-            return LinearGradient(
-                colors: [
-                    Color(red: 0.10, green: 0.14, blue: 0.24),
-                    Color(red: 0.19, green: 0.16, blue: 0.29),
-                    Color(red: 0.07, green: 0.09, blue: 0.16)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        default:
-            return LinearGradient(
-                colors: [
-                    Color(red: 0.18, green: 0.20, blue: 0.28),
-                    Color(red: 0.24, green: 0.21, blue: 0.31),
-                    Color(red: 0.12, green: 0.13, blue: 0.18)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            if isHero == false {
+                shape.strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+            }
         }
+        .shadow(color: Color.black.opacity(isHero ? palette.shadowOpacity * 0.54 : palette.shadowOpacity), radius: isHero ? 16 : 26, y: isHero ? 8 : 18)
     }
 
     @ViewBuilder
     private var sceneDecor: some View {
-        switch scene.backdropStyle {
-        case "library-depth":
-            libraryBackdrop
-        case "city-bokeh":
-            cityBackdrop
+        if metrics.emphasis == .hero {
+            ZStack {
+                Circle()
+                    .fill(palette.accent.opacity(0.10))
+                    .frame(width: metrics.size.width * 0.52, height: metrics.size.width * 0.52)
+                    .blur(radius: 26)
+                    .offset(x: metrics.size.width * 0.18, y: -metrics.size.height * 0.12)
+
+                Ellipse()
+                    .fill(Color.white.opacity(0.07))
+                    .frame(width: metrics.size.width * 0.84, height: metrics.size.height * 0.52)
+                    .blur(radius: 38)
+                    .offset(y: -metrics.size.height * 0.06)
+            }
+        } else {
+        switch scene.id {
+        case "study":
+            VStack(spacing: metrics.size.height * 0.03) {
+                ForEach(0..<4, id: \.self) { _ in
+                    HStack(spacing: metrics.size.width * 0.016) {
+                        ForEach(0..<7, id: \.self) { column in
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .fill(Color.white.opacity(column.isMultiple(of: 2) ? 0.08 : 0.04))
+                                .frame(height: metrics.size.height * 0.10)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, metrics.size.width * 0.09)
+            .padding(.top, metrics.size.height * 0.10)
+            .padding(.bottom, metrics.size.height * 0.22)
+        case "nightcity":
+            VStack {
+                HStack(spacing: metrics.size.width * 0.06) {
+                    ForEach(0..<5, id: \.self) { index in
+                        Circle()
+                            .fill((index.isMultiple(of: 2) ? palette.accent : palette.ambient).opacity(0.18))
+                            .frame(width: metrics.size.width * (index.isMultiple(of: 2) ? 0.10 : 0.07))
+                            .blur(radius: 16)
+                    }
+                }
+                .padding(.top, metrics.size.height * 0.12)
+                Spacer()
+            }
         default:
-            sunroomBackdrop
-        }
-    }
-
-    private var sunroomBackdrop: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: metrics.cornerRadius, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.10),
-                            Color.white.opacity(0.02)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-
-            HStack(spacing: metrics.size.width * 0.05) {
+            HStack(spacing: metrics.size.width * 0.04) {
                 ForEach(0..<3, id: \.self) { _ in
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .fill(
                             LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.24),
-                                    Color.white.opacity(0.04)
-                                ],
+                                colors: [Color.white.opacity(0.16), Color.white.opacity(0.03)],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
@@ -455,492 +1526,903 @@ private struct CharacterStageBackground: View {
             }
             .padding(.horizontal, metrics.size.width * 0.08)
             .padding(.top, metrics.size.height * 0.07)
-            .padding(.bottom, metrics.size.height * 0.22)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(width: metrics.size.width * 0.22)
-                .blur(radius: 34)
-                .rotationEffect(.degrees(-18))
-                .offset(x: metrics.size.width * 0.18, y: -metrics.size.height * 0.15)
-
-            Circle()
-                .fill(Color(red: 1.0, green: 0.82, blue: 0.62).opacity(0.20))
-                .frame(width: metrics.size.width * 0.30)
-                .blur(radius: 20)
-                .offset(x: -metrics.size.width * 0.23, y: -metrics.size.height * 0.20)
+            .padding(.bottom, metrics.size.height * 0.20)
         }
-    }
-
-    private var libraryBackdrop: some View {
-        ZStack {
-            VStack(spacing: metrics.size.height * 0.035) {
-                ForEach(0..<4, id: \.self) { row in
-                    HStack(spacing: metrics.size.width * 0.018) {
-                        ForEach(0..<8, id: \.self) { column in
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(
-                                    Color.white.opacity(((row + column) % 3 == 0) ? 0.14 : 0.07)
-                                )
-                                .frame(height: metrics.size.height * (column % 2 == 0 ? 0.12 : 0.10))
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, metrics.size.width * 0.08)
-            .padding(.top, metrics.size.height * 0.10)
-            .padding(.bottom, metrics.size.height * 0.26)
-            .blur(radius: 0.4)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.10))
-                .frame(width: metrics.size.width * 0.16)
-                .blur(radius: 24)
-                .rotationEffect(.degrees(12))
-                .offset(x: -metrics.size.width * 0.12, y: -metrics.size.height * 0.10)
-        }
-    }
-
-    private var cityBackdrop: some View {
-        ZStack(alignment: .bottom) {
-            VStack {
-                HStack(spacing: metrics.size.width * 0.06) {
-                    ForEach(0..<4, id: \.self) { index in
-                        Circle()
-                            .fill((index % 2 == 0 ? palette.accent : Color(red: 0.56, green: 0.72, blue: 1.0)).opacity(0.24))
-                            .frame(width: metrics.size.width * (index % 2 == 0 ? 0.12 : 0.08))
-                            .blur(radius: 16)
-                    }
-                }
-                .padding(.top, metrics.size.height * 0.12)
-                Spacer()
-            }
-
-            HStack(alignment: .bottom, spacing: metrics.size.width * 0.028) {
-                ForEach(0..<9, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.white.opacity(index % 3 == 0 ? 0.16 : 0.08))
-                        .frame(width: metrics.size.width * 0.07, height: metrics.size.height * [0.16, 0.22, 0.19, 0.28, 0.17, 0.24, 0.20, 0.15, 0.18][index])
-                }
-            }
-            .padding(.horizontal, metrics.size.width * 0.08)
-            .padding(.bottom, metrics.size.height * 0.19)
         }
     }
 }
 
-private struct CharacterPortrait: View {
-    let character: CharacterProfile
+private struct PhotoPseudo3DPortrait: View {
+    let image: UIImage
+    let portraitProfile: PortraitRenderProfile?
+    let focusRect: CGRect
     let scene: CharacterScene
-    let pack: CharacterPackManifest
-    let palette: CharacterStagePalette
+    let palette: PhotoStagePalette
     let pose: CharacterStagePose
     let metrics: CharacterStageMetrics
     let state: AvatarState
 
-    private var look: CharacterLook {
-        CharacterLook(characterID: character.id)
+    private var portraitShape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: metrics.portraitCornerRadius, style: .continuous)
+    }
+
+    private var profile: PortraitRenderProfile {
+        portraitProfile ?? CharacterCatalog.primaryPortraitProfile
+    }
+
+    private var isHero: Bool {
+        metrics.emphasis == .hero
+    }
+
+    private var keylightTint: Color {
+        profile.lightingPreset.contains("daylight")
+            ? Color(red: 1.00, green: 0.97, blue: 0.92)
+            : Color.white
+    }
+
+    private var shadowTint: Color {
+        profile.lightingPreset.contains("daylight")
+            ? Color(red: 0.20, green: 0.14, blue: 0.12)
+            : Color.black
     }
 
     var body: some View {
+        Group {
+            if isHero {
+                heroPortrait
+            } else {
+                compactPortrait
+            }
+        }
+    }
+
+    private var compactPortrait: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: metrics.portraitCornerRadius + 8, style: .continuous)
+                .fill(Color.black.opacity(0.18))
+                .frame(width: metrics.portraitSize.width + 18, height: metrics.portraitSize.height + 20)
+                .blur(radius: 10)
+                .offset(x: pose.swayX * 0.55, y: 26)
+
+            portraitCard
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY)), axis: (x: 1, y: 0, z: 0), perspective: 0.75)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX)), axis: (x: 0, y: 1, z: 0), perspective: 0.75)
+                .rotationEffect(pose.tilt)
+                .offset(x: pose.swayX, y: pose.swayY + pose.breathing * 1.5)
+
+            glassReflection
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY)), axis: (x: 1, y: 0, z: 0), perspective: 0.75)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX)), axis: (x: 0, y: 1, z: 0), perspective: 0.75)
+                .rotationEffect(pose.tilt)
+                .offset(x: pose.swayX, y: pose.swayY + pose.breathing * 1.5)
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var heroPortrait: some View {
         ZStack {
             Ellipse()
-                .fill(palette.shadow.opacity(0.40))
-                .frame(width: 190, height: 36)
-                .blur(radius: 16)
-                .offset(y: 166)
+                .fill(Color.black.opacity(0.20))
+                .frame(width: metrics.portraitSize.width * 0.72, height: 44)
+                .blur(radius: 20)
+                .offset(y: metrics.portraitSize.height * 0.47)
 
-            torsoLayer
-                .offset(y: pose.bodyFloat * 0.55)
-
-            neck
-                .offset(y: 42 + pose.bodyFloat * 0.55)
-
-            headLayer
-                .offset(x: pose.headOffsetX, y: pose.headOffsetY + pose.bodyFloat * 0.6 - 4)
-                .rotationEffect(pose.headTilt, anchor: .bottom)
-
-            if look == .nova {
-                Circle()
-                    .fill(palette.accent.opacity(0.16))
-                    .frame(width: 180, height: 180)
-                    .blur(radius: 24)
-                    .offset(y: -6)
-                    .blendMode(.screen)
-            }
+            heroPortraitCard
+                .frame(width: metrics.portraitSize.width, height: metrics.portraitSize.height)
+                .rotation3DEffect(.degrees(Double(pose.perspectiveY * 0.55)), axis: (x: 1, y: 0, z: 0), perspective: 0.82)
+                .rotation3DEffect(.degrees(Double(-pose.perspectiveX * 0.72)), axis: (x: 0, y: 1, z: 0), perspective: 0.82)
+                .rotationEffect(.degrees(pose.tilt.degrees * 0.45))
+                .offset(x: pose.swayX * 0.7, y: pose.swayY * 0.55 + pose.breathing * 1.2)
         }
     }
 
-    private var torsoLayer: some View {
+    private var heroPortraitCard: some View {
         ZStack {
-            TorsoShape(look: look)
-                .fill(
-                    LinearGradient(
-                        colors: [palette.outfitPrimary, palette.outfitSecondary],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay {
-                    TorsoShape(look: look)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                }
-                .frame(width: 236, height: 210)
-                .shadow(color: Color.black.opacity(0.24), radius: 18, y: 18)
+            portraitShape
+                .fill(Color.black.opacity(0.08))
 
-            clothingDetail
-                .offset(y: 22)
-
-            if state == .listening || state == .speaking {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.10))
-                    .frame(width: 78, height: 10)
-                    .blur(radius: 7)
-                    .offset(y: 76 - pose.shoulderLift * 0.2)
-            }
-        }
-        .offset(y: 124 + pose.shoulderLift * 0.35)
-    }
-
-    @ViewBuilder
-    private var clothingDetail: some View {
-        switch look {
-        case .nova:
             ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color.white.opacity(0.09))
-                    .frame(width: 136, height: 110)
-                HStack(spacing: 28) {
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.22))
-                        .frame(width: 22, height: 94)
-                        .rotationEffect(.degrees(12))
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.18))
-                        .frame(width: 20, height: 82)
-                        .rotationEffect(.degrees(-10))
-                }
-                .offset(y: -4)
-            }
-        case .lyra:
-            VStack(spacing: 10) {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.18))
-                    .frame(width: 122, height: 18)
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.09))
-                    .frame(width: 150, height: 54)
-            }
-        case .sol:
-            HStack(spacing: 16) {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.16))
-                    .frame(width: 38, height: 98)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.black.opacity(0.16))
-                    .frame(width: 110, height: 104)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.14))
-                    .frame(width: 38, height: 98)
-            }
-        }
-    }
+                photoLayer(
+                    blurRadius: 18,
+                    brightness: -0.05,
+                    opacity: 0.38,
+                    xShift: -pose.perspectiveX * 2.0,
+                    yShift: -pose.perspectiveY * 1.8,
+                    extraScale: 0.08
+                )
 
-    private var neck: some View {
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(
+                photoLayer(
+                    blurRadius: 0,
+                    brightness: 0.01,
+                    opacity: 1,
+                    xShift: pose.perspectiveX * 1.2,
+                    yShift: pose.perspectiveY * 0.9,
+                    extraScale: 0.06
+                )
+
+                lowerFaceMotionLayer
+                cheekMotionLayer
+                blinkShadeLayer
+                eyeCatchlightLayer
+
+                portraitLighting
+
                 LinearGradient(
-                    colors: [palette.skinLight, palette.skinMid],
+                    colors: [
+                        keylightTint.opacity(0.09),
+                        .clear,
+                        shadowTint.opacity(0.18)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        .clear,
+                        Color.black.opacity(0.10)
+                    ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
+            }
+            .clipShape(portraitShape)
+
+            portraitShape
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+
+            portraitShape
+                .stroke(Color.white.opacity(0.06), lineWidth: 8)
+                .blur(radius: 12)
+                .opacity(0.45)
+
+            Rectangle()
+                .fill(keylightTint.opacity(0.12))
+                .frame(width: metrics.portraitSize.width * 0.18)
+                .blur(radius: 18)
+                .rotationEffect(.degrees(-17))
+                .offset(x: metrics.portraitSize.width * 0.18, y: -metrics.portraitSize.height * 0.18)
+                .clipShape(portraitShape)
+                .blendMode(.screen)
+        }
+    }
+
+    private var portraitCard: some View {
+        ZStack {
+            portraitShape
+                .fill(Color.white.opacity(0.08))
+                .background(.ultraThinMaterial, in: portraitShape)
+
+            portraitShape
+                .fill(Color.black.opacity(0.24))
+                .overlay {
+                    ZStack {
+                        photoLayer(
+                            blurRadius: 16,
+                            brightness: -0.06,
+                            opacity: 0.54,
+                            xShift: -pose.perspectiveX * 1.8,
+                            yShift: -pose.perspectiveY * 1.4,
+                            extraScale: 0.12
+                        )
+
+                        photoLayer(
+                            blurRadius: 0,
+                            brightness: 0,
+                            opacity: 1,
+                            xShift: pose.perspectiveX * 0.9,
+                            yShift: pose.perspectiveY * 0.7,
+                            extraScale: 0.04
+                        )
+
+                        lowerFaceMotionLayer
+                        cheekMotionLayer
+                        blinkShadeLayer
+                        eyeCatchlightLayer
+
+                        portraitLighting
+                    }
+                    .clipShape(portraitShape)
+                }
+
+            portraitShape
+                .stroke(palette.frame, lineWidth: 1)
+                .shadow(color: palette.frameShadow, radius: 30, y: 18)
+
+            portraitShape
+                .stroke(Color.white.opacity(0.06), lineWidth: 6)
+                .blur(radius: 12)
+                .opacity(0.7)
+        }
+    }
+
+    private func photoLayer(
+        blurRadius: CGFloat,
+        brightness: Double,
+        opacity: Double,
+        xShift: CGFloat,
+        yShift: CGFloat,
+        extraScale: CGFloat
+    ) -> some View {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.92 : 1.12) + extraScale
+        let focusX = ((focusRect.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((focusRect.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFill()
+            .frame(width: size.width * imageScale, height: size.height * imageScale)
+            .saturation(state == .error ? 0.75 : palette.portraitSaturation)
+            .brightness(brightness)
+            .contrast(palette.portraitContrast)
+            .blur(radius: blurRadius)
+            .opacity(opacity)
+            .offset(
+                x: -focusX + xShift,
+                y: -focusY + yShift - size.height * (isHero ? 0.19 : 0.05)
             )
-            .frame(width: 54, height: 74)
-            .overlay(alignment: .top) {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.16))
-                    .frame(width: 28, height: 10)
-                    .offset(y: 10)
-            }
-            .shadow(color: Color.black.opacity(0.10), radius: 7, y: 4)
     }
 
-    private var headLayer: some View {
+    private var lowerFaceMotionLayer: some View {
+        let height = metrics.portraitSize.height
+        let width = metrics.portraitSize.width
+        let maskWidth = width * max(0.24, profile.mouthRect.width * 1.25)
+        let maskHeight = height * max(0.12, profile.mouthRect.height * 1.30)
+        let mouthCenter = pointInCard(for: CGPoint(x: profile.mouthRect.midX, y: profile.mouthRect.midY), extraScale: 0.06)
+        let maskX = mouthCenter.x - width / 2
+        let maskY = mouthCenter.y - height / 2
+
+        return photoLayer(
+            blurRadius: 0.6,
+            brightness: 0.03,
+            opacity: state == .speaking ? 0.34 : 0.12,
+            xShift: pose.perspectiveX * 1.1,
+            yShift: pose.perspectiveY * 0.9 + pose.mouthPulse * 1.8,
+            extraScale: 0.06
+        )
+        .scaleEffect(
+            x: 1 + pose.mouthPulse * 0.01,
+            y: 1 + pose.mouthPulse * 0.08,
+            anchor: .top
+        )
+        .mask(
+            RoundedRectangle(cornerRadius: maskHeight * 0.34, style: .continuous)
+                .frame(width: maskWidth, height: maskHeight)
+                .offset(x: maskX, y: maskY)
+                .blur(radius: 8)
+        )
+    }
+
+    private var cheekMotionLayer: some View {
+        photoLayer(
+            blurRadius: 0,
+            brightness: 0.02,
+            opacity: state == .speaking ? 0.10 : 0.04,
+            xShift: pose.perspectiveX * 0.95,
+            yShift: pose.perspectiveY * 0.82 + pose.mouthPulse * 0.45,
+            extraScale: 0.08
+        )
+        .scaleEffect(
+            x: 1 + pose.mouthPulse * 0.004,
+            y: 1 + pose.mouthPulse * 0.018,
+            anchor: UnitPoint(x: profile.mouthRect.midX, y: max(0.04, profile.mouthRect.minY - 0.10))
+        )
+        .mask(
+            Ellipse()
+                .frame(
+                    width: metrics.portraitSize.width * max(0.42, profile.focusCrop.width * 0.62),
+                    height: metrics.portraitSize.height * max(0.28, profile.focusCrop.height * 0.34)
+                )
+                .offset(y: metrics.portraitSize.height * 0.02)
+                .blur(radius: 12)
+        )
+        .blendMode(.overlay)
+    }
+
+    private var blinkShadeLayer: some View {
+        let eyeCenter = averageEyeAnchor
+        let eyePoint = pointInCard(for: eyeCenter, extraScale: 0.08)
+
+        return RoundedRectangle(cornerRadius: metrics.portraitSize.height * 0.04, style: .continuous)
+            .fill(shadowTint.opacity(Double((1 - pose.blink) * 0.18)))
+            .frame(
+                width: metrics.portraitSize.width * max(0.34, profile.focusCrop.width * 0.44),
+                height: metrics.portraitSize.height * max(0.08, profile.focusCrop.height * 0.10)
+            )
+            .blur(radius: 10)
+            .offset(
+                x: eyePoint.x - metrics.portraitSize.width / 2,
+                y: eyePoint.y - metrics.portraitSize.height / 2
+            )
+            .blendMode(.multiply)
+    }
+
+    private var eyeCatchlightLayer: some View {
         ZStack {
-            BackHairShape(look: look)
+            ForEach(Array(profile.eyeAnchors.enumerated()), id: \.offset) { index, eyeAnchor in
+                let point = pointInCard(for: eyeAnchor, extraScale: 0.08)
+
+                Circle()
+                    .fill(keylightTint.opacity(pose.blink > 0.14 ? 0.80 : 0.18))
+                    .frame(width: isHero ? 7 : 5, height: isHero ? 7 : 5)
+                    .blur(radius: isHero ? 0.8 : 0.5)
+                    .offset(
+                        x: point.x - metrics.portraitSize.width / 2 + (index == 0 ? -1.2 : 1.0),
+                        y: point.y - metrics.portraitSize.height / 2 - (isHero ? 1.8 : 1.0)
+                    )
+            }
+        }
+        .blendMode(.screen)
+        .opacity(state == .error ? 0.20 : 1.0)
+    }
+
+    private var portraitLighting: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    keylightTint.opacity(palette.highlightOpacity * pose.shimmer),
+                    .clear,
+                    shadowTint.opacity(0.18)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            RadialGradient(
+                colors: [palette.ambient.opacity(Double(pose.glow * palette.glowMultiplier) * 0.55), .clear],
+                center: UnitPoint(
+                    x: 0.48 + pose.perspectiveX * 0.01,
+                    y: 0.28 + pose.perspectiveY * 0.01
+                ),
+                startRadius: 8,
+                endRadius: metrics.portraitSize.width * 0.52
+            )
+            .blendMode(.screen)
+
+            RadialGradient(
+                colors: [
+                    keylightTint.opacity(0.08 + Double(pose.shimmer) * 0.05),
+                    .clear
+                ],
+                center: UnitPoint(x: profile.headAnchor.x, y: max(0.18, profile.headAnchor.y + 0.05)),
+                startRadius: 4,
+                endRadius: metrics.portraitSize.width * (isHero ? 0.30 : 0.24)
+            )
+            .blendMode(.screen)
+        }
+    }
+
+    private var glassReflection: some View {
+        portraitShape
+            .fill(
+                LinearGradient(
+                    colors: [
+                        keylightTint.opacity(0.20),
+                        keylightTint.opacity(0.03),
+                        .clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .center
+                )
+            )
+            .overlay(alignment: .topLeading) {
+                Rectangle()
+                    .fill(keylightTint.opacity(0.14))
+                    .frame(width: metrics.portraitSize.width * 0.18)
+                    .blur(radius: 14)
+                    .rotationEffect(.degrees(-18))
+                    .offset(x: metrics.portraitSize.width * 0.06, y: metrics.portraitSize.height * 0.10)
+                    .clipShape(portraitShape)
+            }
+    }
+
+    private var averageEyeAnchor: CGPoint {
+        guard profile.eyeAnchors.isEmpty == false else {
+            return CGPoint(x: profile.headAnchor.x, y: profile.headAnchor.y + 0.16)
+        }
+
+        let sum = profile.eyeAnchors.reduce(CGPoint.zero) { partial, point in
+            CGPoint(x: partial.x + point.x, y: partial.y + point.y)
+        }
+        let count = CGFloat(profile.eyeAnchors.count)
+        return CGPoint(x: sum.x / count, y: sum.y / count)
+    }
+
+    private func pointInCard(for normalizedPoint: CGPoint, extraScale: CGFloat) -> CGPoint {
+        let size = metrics.portraitSize
+        let imageScale: CGFloat = (isHero ? 0.92 : 1.12) + extraScale
+        let focusX = ((focusRect.midX - 0.5) * size.width * (isHero ? 0.22 : 0.30))
+        let focusY = ((focusRect.midY - (isHero ? 0.35 : 0.42)) * size.height * (isHero ? 0.24 : 0.34))
+
+        return CGPoint(
+            x: size.width / 2 + (normalizedPoint.x - 0.5) * size.width * imageScale - focusX,
+            y: size.height / 2 + (normalizedPoint.y - 0.5) * size.height * imageScale - focusY - size.height * (isHero ? 0.19 : 0.05)
+        )
+    }
+}
+
+private enum FallbackHairStyle {
+    case softWave
+    case curtain
+    case crop
+}
+
+private struct FallbackCharacterLook {
+    let skinTop: Color
+    let skinBottom: Color
+    let hair: Color
+    let hairShadow: Color
+    let eye: Color
+    let lip: Color
+    let outfit: Color
+    let outfitAccent: Color
+    let glow: Color
+    let accessory: Color?
+    let hairStyle: FallbackHairStyle
+
+    static func forCharacter(_ characterID: String, palette: PhotoStagePalette) -> FallbackCharacterLook {
+        switch characterID {
+        case "lyra":
+            return FallbackCharacterLook(
+                skinTop: Color(red: 0.94, green: 0.84, blue: 0.77),
+                skinBottom: Color(red: 0.84, green: 0.69, blue: 0.61),
+                hair: Color(red: 0.18, green: 0.13, blue: 0.12),
+                hairShadow: Color(red: 0.10, green: 0.07, blue: 0.07),
+                eye: Color(red: 0.24, green: 0.18, blue: 0.16),
+                lip: Color(red: 0.71, green: 0.36, blue: 0.37),
+                outfit: Color(red: 0.27, green: 0.30, blue: 0.42),
+                outfitAccent: Color(red: 0.86, green: 0.77, blue: 0.63),
+                glow: palette.accent.opacity(0.24),
+                accessory: Color.white.opacity(0.68),
+                hairStyle: .curtain
+            )
+        case "sol":
+            return FallbackCharacterLook(
+                skinTop: Color(red: 0.90, green: 0.73, blue: 0.62),
+                skinBottom: Color(red: 0.77, green: 0.57, blue: 0.47),
+                hair: Color(red: 0.13, green: 0.10, blue: 0.12),
+                hairShadow: Color(red: 0.07, green: 0.05, blue: 0.07),
+                eye: Color(red: 0.19, green: 0.12, blue: 0.10),
+                lip: Color(red: 0.69, green: 0.34, blue: 0.31),
+                outfit: Color(red: 0.23, green: 0.19, blue: 0.25),
+                outfitAccent: Color(red: 0.96, green: 0.64, blue: 0.33),
+                glow: palette.accent.opacity(0.30),
+                accessory: nil,
+                hairStyle: .crop
+            )
+        default:
+            return FallbackCharacterLook(
+                skinTop: Color(red: 0.96, green: 0.84, blue: 0.78),
+                skinBottom: Color(red: 0.86, green: 0.68, blue: 0.63),
+                hair: Color(red: 0.29, green: 0.19, blue: 0.17),
+                hairShadow: Color(red: 0.16, green: 0.10, blue: 0.10),
+                eye: Color(red: 0.21, green: 0.15, blue: 0.13),
+                lip: Color(red: 0.77, green: 0.39, blue: 0.40),
+                outfit: Color(red: 0.17, green: 0.23, blue: 0.38),
+                outfitAccent: Color(red: 0.90, green: 0.50, blue: 0.32),
+                glow: palette.accent.opacity(0.28),
+                accessory: Color(red: 0.96, green: 0.76, blue: 0.44),
+                hairStyle: .softWave
+            )
+        }
+    }
+}
+
+private struct PhotoFallbackStage: View {
+    let characterID: String
+    let palette: PhotoStagePalette
+    let metrics: CharacterStageMetrics
+    let pose: CharacterStagePose
+    let state: AvatarState
+
+    private var look: FallbackCharacterLook {
+        FallbackCharacterLook.forCharacter(characterID, palette: palette)
+    }
+
+    var body: some View {
+        let width = metrics.portraitSize.width
+        let height = metrics.portraitSize.height
+
+        ZStack {
+            RoundedRectangle(cornerRadius: metrics.portraitCornerRadius, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [palette.hairSecondary, palette.hairPrimary],
+                        colors: [palette.top.opacity(0.96), palette.bottom.opacity(0.96)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 172, height: look == .sol ? 148 : 176)
-                .offset(y: look == .sol ? -12 : -4)
 
-            ears
+            Circle()
+                .fill(look.glow)
+                .frame(width: width * 0.86, height: width * 0.86)
+                .blur(radius: metrics.emphasis == .hero ? 26 : 18)
+                .offset(y: -height * 0.12)
 
-            face
+            RoundedRectangle(cornerRadius: metrics.portraitCornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 1)
 
-            if look == .lyra {
-                lyraHairSides
-            }
-
-            facialFeatures
-
-            FrontHairShape(look: look)
-                .fill(
-                    LinearGradient(
-                        colors: [palette.hairPrimary, palette.hairSecondary],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 154, height: look == .sol ? 102 : 126)
-                .offset(y: look == .sol ? -48 : -42)
-
-            accessory
+            bust(width: width, height: height)
+                .padding(.top, height * 0.06)
+                .padding(.horizontal, width * 0.05)
         }
+        .frame(width: width, height: height)
+        .saturation(state == .error ? 0.62 : 1)
+        .opacity(state == .error ? 0.86 : 1)
     }
 
-    private var ears: some View {
-        HStack(spacing: 102) {
-            Circle()
-                .fill(palette.skinMid)
-                .frame(width: 18, height: 26)
-            Circle()
-                .fill(palette.skinMid)
-                .frame(width: 18, height: 26)
-        }
-        .offset(y: 6)
-    }
+    @ViewBuilder
+    private func bust(width: CGFloat, height: CGFloat) -> some View {
+        let blinkScale = max(pose.blink, 0.04)
+        let faceWidth = width * 0.43
+        let faceHeight = height * 0.50
+        let eyeWidth = faceWidth * 0.14
+        let eyeHeight = max(faceHeight * 0.038 * blinkScale, 1.8)
+        let pupilSize = max(faceWidth * 0.030, 4)
+        let pupilOffsetX = pose.gazeX * 0.35
+        let pupilOffsetY = pose.gazeY * 0.20
+        let smileLift = max(-4, min(6, pose.smile * 7 - pose.mouthPulse * 2))
+        let mouthHeight = max(3, 5 + pose.mouthPulse * 10)
 
-    private var face: some View {
         ZStack {
-            Ellipse()
+            shoulderShape(width: width, height: height)
                 .fill(
                     LinearGradient(
-                        colors: [palette.skinLight, palette.skinMid],
+                        colors: [look.outfit.opacity(0.98), look.outfit.opacity(0.88)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .frame(width: 132, height: 156)
-                .shadow(color: Color.black.opacity(0.12), radius: 8, y: 5)
+                .overlay(alignment: .top) {
+                    outfitAccentShape(width: width, height: height)
+                        .fill(look.outfitAccent.opacity(0.94))
+                }
+                .shadow(color: Color.black.opacity(0.16), radius: 18, y: 12)
+                .offset(y: height * 0.23)
+
+            Capsule(style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [look.skinTop.opacity(0.96), look.skinBottom.opacity(0.96)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: faceWidth * 0.24, height: faceHeight * 0.22)
+                .offset(y: height * 0.11)
+
+            hairBackShape(width: width, height: height)
+                .fill(
+                    LinearGradient(
+                        colors: [look.hair, look.hairShadow],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .offset(y: -height * 0.05)
 
             Ellipse()
-                .fill(Color.white.opacity(0.18))
-                .frame(width: 44, height: 84)
-                .blur(radius: 3)
-                .offset(x: -24, y: -12)
+                .fill(
+                    LinearGradient(
+                        colors: [look.skinTop, look.skinBottom],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: faceWidth, height: faceHeight)
+                .overlay(alignment: .topLeading) {
+                    Circle()
+                        .fill(Color.white.opacity(0.14))
+                        .frame(width: faceWidth * 0.34, height: faceWidth * 0.34)
+                        .blur(radius: 6)
+                        .offset(x: faceWidth * 0.08, y: faceHeight * 0.10)
+                }
+                .shadow(color: Color.black.opacity(0.12), radius: 10, y: 8)
+                .offset(x: pose.perspectiveX * 0.2, y: -height * 0.06)
 
-            Ellipse()
-                .fill(palette.skinShadow.opacity(0.18))
-                .frame(width: 26, height: 78)
-                .blur(radius: 10)
-                .offset(x: 30, y: 12)
+            hairFrontShape(width: width, height: height)
+                .fill(
+                    LinearGradient(
+                        colors: [look.hair, look.hairShadow],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .offset(y: -height * 0.12)
 
-            HStack(spacing: 48) {
-                Circle()
-                    .fill(Color(red: 0.96, green: 0.68, blue: 0.70).opacity(0.20))
-                    .frame(width: 16)
-                Circle()
-                    .fill(Color(red: 0.96, green: 0.68, blue: 0.70).opacity(0.20))
-                    .frame(width: 16)
+            HStack(spacing: faceWidth * 0.20) {
+                eyeStack(
+                    width: eyeWidth,
+                    height: eyeHeight,
+                    pupilSize: pupilSize,
+                    pupilOffsetX: pupilOffsetX,
+                    pupilOffsetY: pupilOffsetY
+                )
+                eyeStack(
+                    width: eyeWidth,
+                    height: eyeHeight,
+                    pupilSize: pupilSize,
+                    pupilOffsetX: pupilOffsetX,
+                    pupilOffsetY: pupilOffsetY
+                )
             }
-            .offset(y: 18)
-        }
-    }
+            .offset(x: pose.perspectiveX * 0.15, y: -height * 0.11 + pose.gazeY * 0.1)
 
-    private var lyraHairSides: some View {
-        HStack(spacing: 98) {
+            eyebrowStack(faceWidth: faceWidth)
+                .offset(x: pose.perspectiveX * 0.12, y: -height * 0.16)
+
             Capsule(style: .continuous)
-                .fill(palette.hairPrimary)
-                .frame(width: 18, height: 108)
-                .rotationEffect(.degrees(5))
-            Capsule(style: .continuous)
-                .fill(palette.hairPrimary)
-                .frame(width: 18, height: 116)
-                .rotationEffect(.degrees(-7))
-        }
-        .offset(y: 26)
-    }
+                .fill(Color.white.opacity(0.22))
+                .frame(width: faceWidth * 0.05, height: faceHeight * 0.12)
+                .rotationEffect(.degrees(8))
+                .offset(x: faceWidth * 0.01 + pose.perspectiveX * 0.08, y: -height * 0.04)
 
-    private var facialFeatures: some View {
-        ZStack {
-            eyeRow
-                .offset(y: -10)
+            mouthShape(width: faceWidth * 0.28, height: CGFloat(mouthHeight), lift: CGFloat(smileLift))
+                .stroke(look.lip, style: StrokeStyle(lineWidth: max(2.4, CGFloat(mouthHeight) * 0.34), lineCap: .round))
+                .offset(x: pose.perspectiveX * 0.12, y: height * 0.03)
 
-            nose
-                .offset(y: 16)
-
-            mouth
-                .offset(y: 48)
-
-            if state == .error {
-                Capsule(style: .continuous)
-                    .fill(Color.red.opacity(0.22))
-                    .frame(width: 84, height: 10)
-                    .blur(radius: 8)
-                    .offset(y: 72)
+            if let accessory = look.accessory {
+                accessoryView(color: accessory, width: width, height: height)
             }
         }
     }
 
-    private var eyeRow: some View {
-        HStack(spacing: 36) {
-            eye
-            eye
-        }
-        .overlay(alignment: .topLeading) {
-            eyebrows
-        }
-    }
-
-    private var eye: some View {
+    private func eyeStack(
+        width: CGFloat,
+        height: CGFloat,
+        pupilSize: CGFloat,
+        pupilOffsetX: CGFloat,
+        pupilOffsetY: CGFloat
+    ) -> some View {
         ZStack {
             Capsule(style: .continuous)
                 .fill(Color.white.opacity(0.96))
-                .frame(width: 28, height: max(3.5, 15 - pose.blinkAmount * 11))
-
+                .frame(width: width, height: height)
             Circle()
-                .fill(palette.iris)
-                .frame(width: max(4, 11 - pose.blinkAmount * 6))
-                .overlay {
-                    Circle()
-                        .fill(Color.black.opacity(0.75))
-                        .frame(width: max(2, 5 - pose.blinkAmount * 2.5))
-                }
-                .overlay(alignment: .topLeading) {
-                    Circle()
-                        .fill(Color.white.opacity(0.95))
-                        .frame(width: 3, height: 3)
-                        .offset(x: 2, y: 1)
-                }
-                .offset(x: pose.gazeX, y: pose.gazeY)
-                .mask(
-                    Capsule(style: .continuous)
-                        .frame(width: 28, height: max(3.5, 15 - pose.blinkAmount * 11))
-                )
-        }
-        .overlay(alignment: .top) {
-            Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.12))
-                .frame(width: 30, height: 4)
-                .offset(y: -7)
-                .opacity(Double(1 - pose.blinkAmount * 0.55))
+                .fill(look.eye)
+                .frame(width: pupilSize, height: pupilSize)
+                .offset(x: pupilOffsetX, y: pupilOffsetY)
+            Circle()
+                .fill(Color.white.opacity(0.68))
+                .frame(width: pupilSize * 0.28, height: pupilSize * 0.28)
+                .offset(x: pupilOffsetX + 1, y: pupilOffsetY - 1)
         }
     }
 
-    private var eyebrows: some View {
-        HStack(spacing: 30) {
+    private func eyebrowStack(faceWidth: CGFloat) -> some View {
+        HStack(spacing: faceWidth * 0.17) {
             Capsule(style: .continuous)
-                .fill(palette.hairPrimary.opacity(0.86))
-                .frame(width: 24, height: 5)
-                .rotationEffect(.degrees(-10 - Double(pose.browLift * 2)))
+                .fill(look.hairShadow.opacity(0.86))
+                .frame(width: faceWidth * 0.18, height: 5)
+                .rotationEffect(.degrees(characterID == "sol" ? -18 : -9))
             Capsule(style: .continuous)
-                .fill(palette.hairPrimary.opacity(0.86))
-                .frame(width: 24, height: 5)
-                .rotationEffect(.degrees(10 + Double(pose.browLift * 2)))
+                .fill(look.hairShadow.opacity(0.86))
+                .frame(width: faceWidth * 0.18, height: 5)
+                .rotationEffect(.degrees(characterID == "sol" ? 11 : 6))
         }
-        .offset(x: 12, y: -16 - pose.browLift)
     }
 
-    private var nose: some View {
-        Path { path in
-            path.move(to: CGPoint(x: 0, y: 0))
-            path.addQuadCurve(to: CGPoint(x: 5, y: 14), control: CGPoint(x: 7, y: 7))
-            path.addQuadCurve(to: CGPoint(x: -2, y: 18), control: CGPoint(x: 4, y: 20))
-        }
-        .stroke(palette.skinShadow.opacity(0.44), style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-        .frame(width: 16, height: 22)
-    }
-
-    private var mouth: some View {
+    private func accessoryView(color: Color, width: CGFloat, height: CGFloat) -> some View {
         ZStack {
-            Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.18))
-                .frame(width: mouthWidth * 1.02, height: mouthHeight * 1.04)
-                .blur(radius: 0.8)
+            if characterID == "lyra" {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(color, lineWidth: 2)
+                    .frame(width: width * 0.17, height: height * 0.08)
+                    .offset(x: -width * 0.10, y: -height * 0.12)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(color, lineWidth: 2)
+                    .frame(width: width * 0.17, height: height * 0.08)
+                    .offset(x: width * 0.10, y: -height * 0.12)
+                Rectangle()
+                    .fill(color)
+                    .frame(width: width * 0.06, height: 2)
+                    .offset(y: -height * 0.12)
+            } else {
+                Circle()
+                    .fill(color)
+                    .frame(width: width * 0.034, height: width * 0.034)
+                    .offset(x: width * 0.17, y: -height * 0.02)
+            }
+        }
+    }
 
-            Capsule(style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [palette.lip, palette.lip.opacity(0.74)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+    private func shoulderShape(width: CGFloat, height: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: width * 0.14, y: height * 0.82))
+            path.addCurve(
+                to: CGPoint(x: width * 0.50, y: height * 0.58),
+                control1: CGPoint(x: width * 0.18, y: height * 0.64),
+                control2: CGPoint(x: width * 0.34, y: height * 0.56)
+            )
+            path.addCurve(
+                to: CGPoint(x: width * 0.86, y: height * 0.82),
+                control1: CGPoint(x: width * 0.66, y: height * 0.56),
+                control2: CGPoint(x: width * 0.82, y: height * 0.64)
+            )
+            path.addLine(to: CGPoint(x: width * 0.92, y: height * 0.98))
+            path.addLine(to: CGPoint(x: width * 0.08, y: height * 0.98))
+            path.closeSubpath()
+        }
+    }
+
+    private func outfitAccentShape(width: CGFloat, height: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: width * 0.50, y: height * 0.60))
+            path.addLine(to: CGPoint(x: width * 0.46, y: height * 0.84))
+            path.addLine(to: CGPoint(x: width * 0.54, y: height * 0.84))
+            path.closeSubpath()
+        }
+    }
+
+    private func hairBackShape(width: CGFloat, height: CGFloat) -> Path {
+        switch look.hairStyle {
+        case .softWave:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.30, y: height * 0.10))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.22, y: height * 0.54),
+                    control1: CGPoint(x: width * 0.18, y: height * 0.18),
+                    control2: CGPoint(x: width * 0.16, y: height * 0.42)
                 )
-                .frame(width: mouthWidth, height: mouthHeight)
-                .overlay {
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(0.14), lineWidth: 1)
-                }
-
-            if pose.mouthOpen > 0.16 {
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: mouthWidth * 0.34, height: 3)
-                    .offset(y: -mouthHeight * 0.2)
-            }
-        }
-        .clipShape(Capsule(style: .continuous))
-        .rotationEffect(.degrees(Double(-pose.smileCurve * 8)))
-        .overlay(alignment: .top) {
-            Path { path in
-                path.move(to: CGPoint(x: 0, y: 8))
-                path.addQuadCurve(
-                    to: CGPoint(x: mouthWidth, y: 8),
-                    control: CGPoint(x: mouthWidth / 2, y: 8 - (pose.smileCurve * 18))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.78, y: height * 0.54),
+                    control1: CGPoint(x: width * 0.34, y: height * 0.70),
+                    control2: CGPoint(x: width * 0.66, y: height * 0.70)
                 )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.70, y: height * 0.10),
+                    control1: CGPoint(x: width * 0.84, y: height * 0.42),
+                    control2: CGPoint(x: width * 0.82, y: height * 0.18)
+                )
+                path.closeSubpath()
             }
-            .stroke(Color.black.opacity(0.20), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            .frame(width: mouthWidth, height: 18)
-        }
-    }
-
-    private var accessory: some View {
-        Group {
-            switch look {
-            case .nova:
-                HStack(spacing: 90) {
-                    Circle()
-                        .fill(palette.accent.opacity(0.88))
-                        .frame(width: 8, height: 8)
-                    Circle()
-                        .fill(palette.accent.opacity(0.88))
-                        .frame(width: 8, height: 8)
-                }
-                .offset(y: 34)
-            case .lyra:
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.14))
-                    .frame(width: 62, height: 16)
-                    .offset(y: 88)
-            case .sol:
-                Capsule(style: .continuous)
-                    .fill(palette.accent.opacity(0.80))
-                    .frame(width: 34, height: 8)
-                    .offset(x: 42, y: 38)
+        case .curtain:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.28, y: height * 0.10))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.20, y: height * 0.48),
+                    control1: CGPoint(x: width * 0.18, y: height * 0.16),
+                    control2: CGPoint(x: width * 0.16, y: height * 0.36)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.80, y: height * 0.48),
+                    control1: CGPoint(x: width * 0.36, y: height * 0.64),
+                    control2: CGPoint(x: width * 0.64, y: height * 0.64)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.72, y: height * 0.10),
+                    control1: CGPoint(x: width * 0.84, y: height * 0.36),
+                    control2: CGPoint(x: width * 0.82, y: height * 0.16)
+                )
+                path.closeSubpath()
+            }
+        case .crop:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.30, y: height * 0.16))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.24, y: height * 0.40),
+                    control1: CGPoint(x: width * 0.21, y: height * 0.20),
+                    control2: CGPoint(x: width * 0.20, y: height * 0.32)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.76, y: height * 0.40),
+                    control1: CGPoint(x: width * 0.38, y: height * 0.50),
+                    control2: CGPoint(x: width * 0.62, y: height * 0.50)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.70, y: height * 0.16),
+                    control1: CGPoint(x: width * 0.80, y: height * 0.32),
+                    control2: CGPoint(x: width * 0.79, y: height * 0.20)
+                )
+                path.closeSubpath()
             }
         }
     }
 
-    private var mouthWidth: CGFloat {
-        switch look {
-        case .lyra:
-            return 30
-        case .sol:
-            return 38
-        case .nova:
-            return 34
+    private func hairFrontShape(width: CGFloat, height: CGFloat) -> Path {
+        switch look.hairStyle {
+        case .softWave:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.28, y: height * 0.18))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.46, y: height * 0.12),
+                    control1: CGPoint(x: width * 0.32, y: height * 0.10),
+                    control2: CGPoint(x: width * 0.40, y: height * 0.09)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.72, y: height * 0.20),
+                    control1: CGPoint(x: width * 0.54, y: height * 0.15),
+                    control2: CGPoint(x: width * 0.65, y: height * 0.13)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.62, y: height * 0.32),
+                    control1: CGPoint(x: width * 0.72, y: height * 0.24),
+                    control2: CGPoint(x: width * 0.67, y: height * 0.32)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.44, y: height * 0.24),
+                    control1: CGPoint(x: width * 0.56, y: height * 0.32),
+                    control2: CGPoint(x: width * 0.48, y: height * 0.30)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.28, y: height * 0.18),
+                    control1: CGPoint(x: width * 0.34, y: height * 0.20),
+                    control2: CGPoint(x: width * 0.30, y: height * 0.20)
+                )
+                path.closeSubpath()
+            }
+        case .curtain:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.32, y: height * 0.20))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.50, y: height * 0.14),
+                    control1: CGPoint(x: width * 0.36, y: height * 0.12),
+                    control2: CGPoint(x: width * 0.44, y: height * 0.10)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.68, y: height * 0.20),
+                    control1: CGPoint(x: width * 0.56, y: height * 0.10),
+                    control2: CGPoint(x: width * 0.64, y: height * 0.12)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.60, y: height * 0.34),
+                    control1: CGPoint(x: width * 0.68, y: height * 0.28),
+                    control2: CGPoint(x: width * 0.66, y: height * 0.34)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.50, y: height * 0.28),
+                    control1: CGPoint(x: width * 0.56, y: height * 0.34),
+                    control2: CGPoint(x: width * 0.52, y: height * 0.32)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.40, y: height * 0.34),
+                    control1: CGPoint(x: width * 0.48, y: height * 0.32),
+                    control2: CGPoint(x: width * 0.44, y: height * 0.34)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.32, y: height * 0.20),
+                    control1: CGPoint(x: width * 0.34, y: height * 0.34),
+                    control2: CGPoint(x: width * 0.32, y: height * 0.28)
+                )
+                path.closeSubpath()
+            }
+        case .crop:
+            return Path { path in
+                path.move(to: CGPoint(x: width * 0.28, y: height * 0.24))
+                path.addCurve(
+                    to: CGPoint(x: width * 0.74, y: height * 0.22),
+                    control1: CGPoint(x: width * 0.38, y: height * 0.12),
+                    control2: CGPoint(x: width * 0.64, y: height * 0.10)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.64, y: height * 0.34),
+                    control1: CGPoint(x: width * 0.72, y: height * 0.30),
+                    control2: CGPoint(x: width * 0.68, y: height * 0.34)
+                )
+                path.addCurve(
+                    to: CGPoint(x: width * 0.28, y: height * 0.24),
+                    control1: CGPoint(x: width * 0.54, y: height * 0.28),
+                    control2: CGPoint(x: width * 0.38, y: height * 0.28)
+                )
+                path.closeSubpath()
+            }
         }
     }
 
-    private var mouthHeight: CGFloat {
-        let base: CGFloat = 10
-        let stretched = base + pose.mouthOpen * 34
-        return min(max(stretched, 8), 34)
+    private func mouthShape(width: CGFloat, height: CGFloat, lift: CGFloat) -> Path {
+        Path { path in
+            path.move(to: CGPoint(x: width * 0.36, y: height * 0.50))
+            path.addQuadCurve(
+                to: CGPoint(x: width * 0.64, y: height * 0.50),
+                control: CGPoint(x: width * 0.50, y: height * 0.50 + lift)
+            )
+        }
     }
 }
 
@@ -954,21 +2436,21 @@ private struct ThinkingHalo: View {
             .trim(from: 0.14, to: 0.86)
             .stroke(
                 LinearGradient(
-                    colors: [Color.white.opacity(0.24), color.opacity(0.92), Color.white.opacity(0.14)],
+                    colors: [Color.white.opacity(0.18), color.opacity(0.88), Color.white.opacity(0.10)],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 ),
                 style: StrokeStyle(lineWidth: metrics.emphasis == .hero ? 5 : 3, lineCap: .round)
             )
-            .frame(width: 258, height: 258)
-            .rotationEffect(.degrees(Double(pose.attentionLift * 11)))
-            .blur(radius: 0.5)
+            .frame(width: metrics.portraitSize.width + 58, height: metrics.portraitSize.width + 58)
+            .rotationEffect(.degrees(Double(pose.shimmer * 220)))
+            .blur(radius: 0.3)
     }
 }
 
 private struct StageBadge: View {
     let text: String
-    let palette: CharacterStagePalette
+    let palette: PhotoStagePalette
 
     var body: some View {
         HStack(spacing: 8) {
@@ -983,7 +2465,7 @@ private struct StageBadge: View {
         .padding(.vertical, 8)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.26))
+                .fill(Color.black.opacity(0.28))
                 .overlay(
                     Capsule(style: .continuous)
                         .stroke(Color.white.opacity(0.12), lineWidth: 1)
@@ -992,205 +2474,27 @@ private struct StageBadge: View {
     }
 }
 
-private struct TorsoShape: Shape {
-    let look: CharacterLook
-
-    func path(in rect: CGRect) -> Path {
-        switch look {
-        case .nova:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.08))
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.08, y: rect.maxY - rect.height * 0.16),
-                    control1: CGPoint(x: rect.maxX - rect.width * 0.10, y: rect.minY + rect.height * 0.02),
-                    control2: CGPoint(x: rect.maxX, y: rect.midY)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.10, y: rect.maxY - rect.height * 0.10),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.10)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.08),
-                    control1: CGPoint(x: rect.minX, y: rect.midY),
-                    control2: CGPoint(x: rect.minX + rect.width * 0.16, y: rect.minY + rect.height * 0.02)
-                )
-            }
-        case .lyra:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.06, y: rect.maxY - rect.height * 0.14),
-                    control1: CGPoint(x: rect.maxX - rect.width * 0.12, y: rect.minY + rect.height * 0.08),
-                    control2: CGPoint(x: rect.maxX, y: rect.midY)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.06, y: rect.maxY - rect.height * 0.14),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.06)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY),
-                    control1: CGPoint(x: rect.minX, y: rect.midY),
-                    control2: CGPoint(x: rect.minX + rect.width * 0.12, y: rect.minY + rect.height * 0.08)
-                )
-            }
-        case .sol:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.04))
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.04, y: rect.maxY - rect.height * 0.10),
-                    control1: CGPoint(x: rect.maxX - rect.width * 0.08, y: rect.minY),
-                    control2: CGPoint(x: rect.maxX, y: rect.midY)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.04, y: rect.maxY - rect.height * 0.08),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.12)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.04),
-                    control1: CGPoint(x: rect.minX, y: rect.midY),
-                    control2: CGPoint(x: rect.minX + rect.width * 0.08, y: rect.minY)
-                )
-            }
-        }
-    }
-}
-
-private struct BackHairShape: Shape {
-    let look: CharacterLook
-
-    func path(in rect: CGRect) -> Path {
-        switch look {
-        case .nova:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.minX + rect.width * 0.18, y: rect.minY + rect.height * 0.30))
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.04),
-                    control: CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY + rect.height * 0.02)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.10, y: rect.minY + rect.height * 0.28),
-                    control: CGPoint(x: rect.maxX - rect.width * 0.16, y: rect.minY + rect.height * 0.02)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.24, y: rect.maxY - rect.height * 0.02),
-                    control1: CGPoint(x: rect.maxX, y: rect.midY),
-                    control2: CGPoint(x: rect.maxX - rect.width * 0.04, y: rect.maxY - rect.height * 0.12)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.18, y: rect.maxY - rect.height * 0.06),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.10)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.18, y: rect.minY + rect.height * 0.30),
-                    control1: CGPoint(x: rect.minX - rect.width * 0.02, y: rect.maxY - rect.height * 0.12),
-                    control2: CGPoint(x: rect.minX + rect.width * 0.02, y: rect.midY)
-                )
-            }
-        case .lyra:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.minX + rect.width * 0.22, y: rect.minY + rect.height * 0.22))
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY),
-                    control: CGPoint(x: rect.minX + rect.width * 0.26, y: rect.minY + rect.height * 0.02)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.18, y: rect.minY + rect.height * 0.18),
-                    control: CGPoint(x: rect.maxX - rect.width * 0.24, y: rect.minY + rect.height * 0.02)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.24, y: rect.maxY - rect.height * 0.04),
-                    control1: CGPoint(x: rect.maxX, y: rect.midY),
-                    control2: CGPoint(x: rect.maxX - rect.width * 0.08, y: rect.maxY - rect.height * 0.08)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.26, y: rect.maxY),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.08)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.22, y: rect.minY + rect.height * 0.22),
-                    control1: CGPoint(x: rect.minX + rect.width * 0.02, y: rect.maxY - rect.height * 0.10),
-                    control2: CGPoint(x: rect.minX + rect.width * 0.06, y: rect.midY)
-                )
-            }
-        case .sol:
-            return Path { path in
-                path.addEllipse(in: CGRect(
-                    x: rect.minX + rect.width * 0.10,
-                    y: rect.minY + rect.height * 0.04,
-                    width: rect.width * 0.80,
-                    height: rect.height * 0.82
-                ))
-            }
-        }
-    }
-}
-
-private struct FrontHairShape: Shape {
-    let look: CharacterLook
-
-    func path(in rect: CGRect) -> Path {
-        switch look {
-        case .nova:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.minX + rect.width * 0.12, y: rect.minY + rect.height * 0.54))
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.midX - rect.width * 0.04, y: rect.minY + rect.height * 0.08),
-                    control: CGPoint(x: rect.minX + rect.width * 0.08, y: rect.minY + rect.height * 0.10)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.midX + rect.width * 0.18, y: rect.minY + rect.height * 0.18),
-                    control: CGPoint(x: rect.midX + rect.width * 0.06, y: rect.minY + rect.height * 0.04)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.08, y: rect.minY + rect.height * 0.46),
-                    control: CGPoint(x: rect.maxX - rect.width * 0.08, y: rect.minY + rect.height * 0.04)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.16, y: rect.maxY),
-                    control1: CGPoint(x: rect.maxX - rect.width * 0.02, y: rect.minY + rect.height * 0.74),
-                    control2: CGPoint(x: rect.maxX - rect.width * 0.10, y: rect.maxY - rect.height * 0.14)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.12, y: rect.minY + rect.height * 0.54),
-                    control: CGPoint(x: rect.minX + rect.width * 0.32, y: rect.maxY + rect.height * 0.04)
-                )
-            }
-        case .lyra:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.minX + rect.width * 0.16, y: rect.minY + rect.height * 0.56))
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.06),
-                    control: CGPoint(x: rect.minX + rect.width * 0.14, y: rect.minY + rect.height * 0.12)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.12, y: rect.minY + rect.height * 0.52),
-                    control: CGPoint(x: rect.maxX - rect.width * 0.12, y: rect.minY + rect.height * 0.06)
-                )
-                path.addLine(to: CGPoint(x: rect.maxX - rect.width * 0.22, y: rect.maxY))
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.20, y: rect.maxY),
-                    control: CGPoint(x: rect.midX, y: rect.maxY + rect.height * 0.06)
-                )
-                path.closeSubpath()
-            }
-        case .sol:
-            return Path { path in
-                path.move(to: CGPoint(x: rect.minX + rect.width * 0.10, y: rect.minY + rect.height * 0.56))
-                path.addCurve(
-                    to: CGPoint(x: rect.midX, y: rect.minY),
-                    control1: CGPoint(x: rect.minX + rect.width * 0.16, y: rect.minY + rect.height * 0.12),
-                    control2: CGPoint(x: rect.midX - rect.width * 0.16, y: rect.minY + rect.height * 0.02)
-                )
-                path.addCurve(
-                    to: CGPoint(x: rect.maxX - rect.width * 0.10, y: rect.minY + rect.height * 0.54),
-                    control1: CGPoint(x: rect.midX + rect.width * 0.16, y: rect.minY + rect.height * 0.02),
-                    control2: CGPoint(x: rect.maxX - rect.width * 0.14, y: rect.minY + rect.height * 0.14)
-                )
-                path.addQuadCurve(
-                    to: CGPoint(x: rect.minX + rect.width * 0.10, y: rect.minY + rect.height * 0.56),
-                    control: CGPoint(x: rect.midX, y: rect.maxY)
-                )
-            }
+private extension CGImagePropertyOrientation {
+    init(_ orientation: UIImage.Orientation) {
+        switch orientation {
+        case .up:
+            self = .up
+        case .down:
+            self = .down
+        case .left:
+            self = .left
+        case .right:
+            self = .right
+        case .upMirrored:
+            self = .upMirrored
+        case .downMirrored:
+            self = .downMirrored
+        case .leftMirrored:
+            self = .leftMirrored
+        case .rightMirrored:
+            self = .rightMirrored
+        @unknown default:
+            self = .up
         }
     }
 }

@@ -3,6 +3,74 @@ import Foundation
 
 @MainActor
 final class ConversationOrchestrator: ObservableObject {
+    struct SpeechChunker {
+        private(set) var policy: SpeechChunkingPolicy
+        private var buffer = ""
+
+        init(policy: SpeechChunkingPolicy = .adaptive) {
+            self.policy = policy
+        }
+
+        mutating func reset(policy: SpeechChunkingPolicy? = nil) {
+            if let policy {
+                self.policy = policy
+            }
+            buffer = ""
+        }
+
+        mutating func append(_ token: String) -> SpeechChunk? {
+            buffer += token
+            guard shouldFlush(afterAppending: token) else { return nil }
+            return dequeueChunk(isFinal: false)
+        }
+
+        mutating func flushRemaining() -> SpeechChunk? {
+            dequeueChunk(isFinal: true)
+        }
+
+        private mutating func dequeueChunk(isFinal: Bool) -> SpeechChunk? {
+            let trimmedBuffer = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            buffer = ""
+            guard trimmedBuffer.isEmpty == false else { return nil }
+            return SpeechChunk(text: trimmedBuffer, isFinal: isFinal)
+        }
+
+        private func shouldFlush(afterAppending latestToken: String) -> Bool {
+            let trimmedBuffer = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmedBuffer.isEmpty == false else { return false }
+
+            let endedSentence = latestToken.contains(".")
+                || latestToken.contains("?")
+                || latestToken.contains("!")
+                || latestToken.contains("\n")
+            let hitPhraseBoundary = latestToken.contains(",")
+                || latestToken.contains(";")
+                || latestToken.contains(":")
+            let wordCount = trimmedBuffer.split(whereSeparator: \.isWhitespace).count
+
+            switch policy {
+            case .sentence:
+                return endedSentence || trimmedBuffer.count >= 120
+            case .phrase:
+                if endedSentence {
+                    return true
+                }
+                if hitPhraseBoundary && (trimmedBuffer.count >= 14 || wordCount >= 3) {
+                    return true
+                }
+                return trimmedBuffer.count >= 64
+            case .adaptive:
+                if endedSentence {
+                    return true
+                }
+                if hitPhraseBoundary && (trimmedBuffer.count >= 28 || wordCount >= 6) {
+                    return true
+                }
+                return trimmedBuffer.count >= 72
+            }
+        }
+    }
+
     @Published private(set) var phase: CallPhase = .idle
     @Published private(set) var avatarState: AvatarState = .idle
     @Published private(set) var activeSession: ConversationSession?
@@ -11,9 +79,11 @@ final class ConversationOrchestrator: ObservableObject {
     @Published private(set) var visibleTurns: [ConversationTurn] = []
     @Published private(set) var liveUserTranscript = ""
     @Published private(set) var liveAssistantTranscript = ""
-    @Published private(set) var subtitleSpeaker: SubtitleSpeaker = .assistant
     @Published private(set) var latestFeedback: FeedbackReport?
     @Published private(set) var audioLevel: Double = 0
+    @Published private(set) var lipSyncFrame: LipSyncFrame = .neutral
+    @Published private(set) var subtitleOverlayState = SubtitleOverlayState()
+    @Published private(set) var lastSpeechInterruption: SpeechInterruptionSnapshot?
     @Published private(set) var errorMessage: String?
     @Published private(set) var isCallActive = false
 
@@ -23,15 +93,34 @@ final class ConversationOrchestrator: ObservableObject {
     private let promptComposer: PromptComposer
     private let feedbackGenerator: FeedbackGenerator
     private let modelManager: ModelDownloadManager
+    private let postCallReviewRuntime: PostCallReviewRuntimeProtocol
+    private let performanceGovernor: PerformanceGovernor
+    private let performanceTracer = CallPerformanceTracer()
+
+    private struct ConversationActivationRequest {
+        var preface: ConversationPreface
+        var memoryContext: String
+        var backend: InferenceBackendPreference
+        var mode: ConversationMode
+    }
 
     private var currentMode: ConversationMode = .chat
-    private var speechQueueBuffer = ""
+    private var speechChunker = SpeechChunker()
     private var lastAssistantResponse = ""
     private var isAssistantSpeaking = false
     private var isGeneratingResponse = false
+    private var activeResponseSessionID: UUID?
     private var didPersistCurrentAssistantTurn = false
     private var hasStartedOpeningTurn = false
     private var currentVoiceStyle: VoiceStyle = .default
+    private var currentSpeechChunkingPolicy: SpeechChunkingPolicy = .adaptive
+    private var pendingUserTranscripts: [String] = []
+    private var pendingBargeInActivatedAt: Date?
+    private var sessionBuffer: ConversationSession?
+    private var lastUserTranscriptCommitAt: Date = .distantPast
+    private var lastAssistantTranscriptCommitAt: Date = .distantPast
+    private var pendingConversationActivation: ConversationActivationRequest?
+    private var conversationActivationTask: Task<Void, Error>?
 
     init(
         inferenceEngine: InferenceEngineProtocol,
@@ -39,7 +128,9 @@ final class ConversationOrchestrator: ObservableObject {
         memoryStore: FileMemoryStore,
         promptComposer: PromptComposer,
         feedbackGenerator: FeedbackGenerator,
-        modelManager: ModelDownloadManager
+        modelManager: ModelDownloadManager,
+        postCallReviewRuntime: PostCallReviewRuntimeProtocol = LocalPostCallReviewRuntime(),
+        performanceGovernor: PerformanceGovernor? = nil
     ) {
         self.inferenceEngine = inferenceEngine
         self.speechPipeline = speechPipeline
@@ -47,77 +138,184 @@ final class ConversationOrchestrator: ObservableObject {
         self.promptComposer = promptComposer
         self.feedbackGenerator = feedbackGenerator
         self.modelManager = modelManager
+        self.postCallReviewRuntime = postCallReviewRuntime
+        self.performanceGovernor = performanceGovernor ?? PerformanceGovernor()
         wireSpeechPipeline()
     }
 
     func beginPreparedCall(_ preparedCall: PreparedCallLaunch) {
         currentMode = preparedCall.mode
-        activeMode = preparedCall.mode
-        inputMode = preparedCall.inputMode
+        setActiveMode(preparedCall.mode)
+        setInputMode(preparedCall.inputMode)
         visibleTurns = []
-        liveUserTranscript = ""
-        liveAssistantTranscript = ""
-        subtitleSpeaker = .assistant
-        latestFeedback = nil
-        errorMessage = nil
-        speechQueueBuffer = ""
+        setLiveUserTranscript("")
+        setLiveAssistantTranscript("")
+        setLatestFeedback(nil)
+        setErrorMessage(nil)
         lastAssistantResponse = ""
         didPersistCurrentAssistantTurn = false
         hasStartedOpeningTurn = false
         audioLevel = 0
         currentVoiceStyle = preparedCall.voiceStyle
+        currentSpeechChunkingPolicy = preparedCall.speechChunkingPolicy
+        speechChunker.reset(policy: preparedCall.speechChunkingPolicy)
+        lastUserTranscriptCommitAt = .distantPast
+        lastAssistantTranscriptCommitAt = .distantPast
+        activeResponseSessionID = nil
+        pendingUserTranscripts = []
+        pendingBargeInActivatedAt = nil
+        sessionBuffer = preparedCall.session
         activeSession = preparedCall.session
-        isCallActive = true
-        phase = .listening
-        avatarState = preparedCall.inputMode == .liveVoice ? .listening : .idle
+        pendingConversationActivation = ConversationActivationRequest(
+            preface: preparedCall.conversationPreface,
+            memoryContext: preparedCall.memoryContext,
+            backend: preparedCall.inferenceBackend,
+            mode: preparedCall.mode
+        )
+        conversationActivationTask?.cancel()
+        conversationActivationTask = nil
+        performanceTracer.begin(sessionID: preparedCall.session.id)
+        setIsCallActive(true)
+        setPhase(.listening)
+        setAvatarState(preparedCall.inputMode == .liveVoice ? .listening : .idle)
+        setLipSyncFrame(.neutral)
+        subtitleOverlayState = SubtitleOverlayState()
+        lastSpeechInterruption = nil
+    }
+
+    func activateLiveAudioIfNeeded() async {
+        guard inputMode == .liveVoice else { return }
+        StartupTrace.mark("ConversationOrchestrator.activateLiveAudioIfNeeded.begin")
+
+        do {
+            try await speechPipeline.prepareAudioSessionForCall()
+            StartupTrace.mark("ConversationOrchestrator.activateLiveAudioIfNeeded.audioSessionPrepared")
+            try await speechPipeline.startListening()
+            StartupTrace.mark("ConversationOrchestrator.activateLiveAudioIfNeeded.listeningStarted")
+        } catch {
+            StartupTrace.mark("ConversationOrchestrator.activateLiveAudioIfNeeded.degraded message=\(error.localizedDescription)")
+            // Keep the call usable when local live audio cannot come up.
+            speechPipeline.stopListening()
+            speechPipeline.interruptSpeech(reason: .runtimeReset)
+            setInputMode(.textAssisted)
+            if phase == .listening {
+                setPhase(.idle)
+            }
+            setAvatarState(.idle)
+        }
+    }
+
+    func activateConversationIfNeeded() async throws {
+        guard let activation = pendingConversationActivation else { return }
+
+        if let conversationActivationTask {
+            try await conversationActivationTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try Task.checkCancellation()
+            try await self.inferenceEngine.prepare(
+                modelURL: self.modelManager.modelURL,
+                backend: activation.backend
+            )
+            StartupTrace.mark("ConversationOrchestrator.activateConversationIfNeeded.inferencePrepared backend=\(activation.backend.rawValue)")
+            try Task.checkCancellation()
+            try await self.inferenceEngine.startConversation(
+                preface: activation.preface,
+                memoryContext: activation.memoryContext,
+                mode: activation.mode
+            )
+            StartupTrace.mark("ConversationOrchestrator.activateConversationIfNeeded.conversationStarted")
+            await self.modelManager.markModelUsed()
+            self.pendingConversationActivation = nil
+        }
+
+        conversationActivationTask = task
+        defer { conversationActivationTask = nil }
+        try await task.value
     }
 
     func failPreparedCall(message: String) {
+        conversationActivationTask?.cancel()
+        conversationActivationTask = nil
+        pendingConversationActivation = nil
         speechPipeline.stopListening()
-        speechPipeline.interruptSpeech()
+        speechPipeline.interruptSpeech(reason: .runtimeReset)
         inferenceEngine.cancelCurrentResponse()
         activeSession = nil
-        activeMode = nil
-        isCallActive = false
-        phase = .idle
-        avatarState = .idle
+        setActiveMode(nil)
+        setIsCallActive(false)
+        sessionBuffer = nil
+        setPhase(.idle)
+        setAvatarState(.idle)
+        activeResponseSessionID = nil
+        speechChunker.reset(policy: .adaptive)
+        lastUserTranscriptCommitAt = .distantPast
+        lastAssistantTranscriptCommitAt = .distantPast
+        pendingUserTranscripts = []
+        pendingBargeInActivatedAt = nil
         hasStartedOpeningTurn = false
-        errorMessage = message
+        currentSpeechChunkingPolicy = .adaptive
+        setErrorMessage(message)
+        setLipSyncFrame(.neutral)
     }
 
     func endCall() async {
-        guard var session = activeSession else { return }
+        guard var session = sessionBuffer ?? activeSession else { return }
 
-        phase = .finishing
+        setPhase(.finishing)
+        setIsCallActive(false)
+        conversationActivationTask?.cancel()
+        conversationActivationTask = nil
+        pendingConversationActivation = nil
+        activeResponseSessionID = nil
+        pendingUserTranscripts = []
+        pendingBargeInActivatedAt = nil
+        inferenceEngine.cancelCurrentResponse()
         speechPipeline.stopListening()
-        speechPipeline.interruptSpeech()
+        speechPipeline.interruptSpeech(reason: .sessionEnded)
         session.endedAt = .now
+        session.speechMetrics = performanceTracer.finalize()
+        session.validationSnapshot = makeValidationSnapshot(for: session)
         let summary = feedbackGenerator.summarizeSession(session)
         session.summary = summary.summary
         session.keyMoments = summary.keyMoments
 
         let snapshot = await memoryStore.fetchSnapshot()
-        let feedback = feedbackGenerator.generateFeedback(for: session, learner: snapshot.learnerProfile, mode: currentMode)
+        let baseFeedback = feedbackGenerator.generateFeedback(for: session, learner: snapshot.learnerProfile, mode: currentMode)
+        let feedback = await postCallReviewRuntime.refineFeedback(
+            baseFeedback,
+            for: session,
+            learner: snapshot.learnerProfile
+        )
         session.feedbackReport = feedback
 
         try? await memoryStore.upsertSession(session)
         try? await memoryStore.saveSessionFeedback(feedback, sessionID: session.id)
 
-        latestFeedback = feedback
+        setLatestFeedback(feedback)
+        sessionBuffer = session
         activeSession = session
-        activeMode = session.mode
-        phase = .idle
-        avatarState = .idle
-        isCallActive = false
-        inputMode = .liveVoice
-        liveUserTranscript = ""
-        liveAssistantTranscript = ""
-        subtitleSpeaker = .assistant
-        speechQueueBuffer = ""
+        setActiveMode(session.mode)
+        setPhase(.idle)
+        setAvatarState(.idle)
+        setIsCallActive(false)
+        setInputMode(.liveVoice)
+        setLiveUserTranscript("")
+        setLiveAssistantTranscript("")
+        speechChunker.reset(policy: .adaptive)
+        lastUserTranscriptCommitAt = .distantPast
+        lastAssistantTranscriptCommitAt = .distantPast
         lastAssistantResponse = ""
         didPersistCurrentAssistantTurn = false
         hasStartedOpeningTurn = false
-        errorMessage = nil
+        currentSpeechChunkingPolicy = .adaptive
+        setErrorMessage(nil)
+        setLipSyncFrame(.neutral)
+        subtitleOverlayState = SubtitleOverlayState()
+        lastSpeechInterruption = nil
     }
 
     func startOpeningTurnIfNeeded(_ instruction: String) async {
@@ -139,20 +337,22 @@ final class ConversationOrchestrator: ObservableObject {
     }
 
     func clearLatestFeedback() {
-        latestFeedback = nil
+        setLatestFeedback(nil)
     }
 
     private func wireSpeechPipeline() {
         speechPipeline.onPartialTranscript = { [weak self] transcript in
             guard let self else { return }
-            self.liveUserTranscript = transcript
-            self.subtitleSpeaker = .user
-            self.audioLevel = max(self.audioLevel, 0.05)
-
+            self.performanceTracer.markFirstPartialTranscriptIfNeeded(transcript)
+            self.commitLiveUserTranscript(transcript)
+            self.updateAudioLevel(max(self.audioLevel, 0.05))
             guard self.inputMode == .liveVoice else { return }
-            if self.isAssistantSpeaking, self.isLikelyEcho(transcript) == false, transcript.count >= 8 {
-                self.interruptAssistantForBargeIn()
-            }
+            guard self.isAssistantSpeaking else { return }
+            let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.count >= 4 else { return }
+            guard self.isLikelyEcho(trimmed) == false else { return }
+            self.pendingBargeInActivatedAt = nil
+            self.interruptAssistantForBargeIn()
         }
 
         speechPipeline.onFinalTranscript = { [weak self] transcript in
@@ -164,11 +364,54 @@ final class ConversationOrchestrator: ObservableObject {
 
         speechPipeline.onVoiceActivity = { [weak self] level in
             guard let self else { return }
-            self.audioLevel = level
+            self.updateAudioLevel(level)
+            if level > 0.08 {
+                self.performanceTracer.markUserSpeechStartIfNeeded()
+            }
             guard self.inputMode == .liveVoice else { return }
             if self.phase == .listening {
-                self.avatarState = level > 0.1 ? .listening : .idle
-                self.subtitleSpeaker = level > 0.1 ? .user : .assistant
+                self.setAvatarState(level > 0.1 ? .listening : .idle)
+            }
+            guard self.isAssistantSpeaking else { return }
+            guard let armedAt = self.pendingBargeInActivatedAt else { return }
+            guard Date().timeIntervalSince(armedAt) >= 0.14 else { return }
+            guard level >= 0.24 else { return }
+            let transcript = self.liveUserTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard transcript.isEmpty || self.isLikelyEcho(transcript) == false else { return }
+            self.pendingBargeInActivatedAt = nil
+            self.interruptAssistantForBargeIn()
+        }
+
+        speechPipeline.onVoiceActivityStateChange = { [weak self] state in
+            guard let self else { return }
+            if state == .userSpeaking {
+                self.performanceTracer.markUserSpeechStartIfNeeded()
+            }
+            guard self.inputMode == .liveVoice else {
+                self.pendingBargeInActivatedAt = nil
+                return
+            }
+            guard self.isAssistantSpeaking else {
+                self.pendingBargeInActivatedAt = nil
+                return
+            }
+
+            switch state {
+            case .userSpeaking:
+                if self.isLikelyEcho(self.liveUserTranscript) {
+                    self.pendingBargeInActivatedAt = nil
+                    return
+                }
+
+                let transcript = self.liveUserTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                if transcript.isEmpty == false, self.audioLevel >= 0.18 {
+                    self.pendingBargeInActivatedAt = nil
+                    self.interruptAssistantForBargeIn()
+                } else {
+                    self.pendingBargeInActivatedAt = .now
+                }
+            case .listening, .silent:
+                self.pendingBargeInActivatedAt = nil
             }
         }
 
@@ -176,11 +419,37 @@ final class ConversationOrchestrator: ObservableObject {
             guard let self else { return }
             self.isAssistantSpeaking = speaking
             if speaking {
-                self.phase = .speaking
-                self.avatarState = .speaking
+                self.performanceTracer.markAssistantSpeechStartIfNeeded()
+                self.setPhase(.speaking)
+                self.setAvatarState(.speaking)
             } else if self.isCallActive, self.isGeneratingResponse == false {
-                self.phase = .listening
-                self.avatarState = self.inputMode == .liveVoice ? .listening : .idle
+                self.setPhase(.listening)
+                self.setAvatarState(self.inputMode == .liveVoice ? .listening : .idle)
+            }
+        }
+
+        speechPipeline.onSpeechEnvelope = { [weak self] envelope in
+            guard let self else { return }
+            if self.isAssistantSpeaking {
+                self.updateAudioLevel(envelope)
+            }
+        }
+
+        speechPipeline.onLipSyncFrame = { [weak self] frame in
+            guard let self else { return }
+            self.performanceTracer.markFirstLipSyncFrameIfNeeded(frame)
+            self.setLipSyncFrame(frame)
+        }
+
+        speechPipeline.onInterruptionReason = { [weak self] reason in
+            guard let self else { return }
+            if reason != .bargeIn {
+                self.lastSpeechInterruption = SpeechInterruptionSnapshot(
+                    reason: reason,
+                    assistantText: self.liveAssistantTranscript,
+                    userText: self.liveUserTranscript,
+                    happenedAt: .now
+                )
             }
         }
     }
@@ -189,97 +458,114 @@ final class ConversationOrchestrator: ObservableObject {
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         guard isLikelyEcho(trimmed) == false else { return }
-        guard isGeneratingResponse == false else { return }
-        liveUserTranscript = ""
-        subtitleSpeaker = .assistant
+        if isGeneratingResponse {
+            enqueuePendingUserTranscript(trimmed)
+            commitLiveUserTranscript(trimmed, force: true)
+            return
+        }
+        setLiveUserTranscript("")
 
         let turn = ConversationTurn(role: .user, text: trimmed)
         visibleTurns.append(turn)
-
-        if var session = activeSession {
-            session.turns.append(turn)
-            activeSession = session
-            try? await memoryStore.saveTurn(turn, sessionID: session.id)
-            try? await memoryStore.upsertSession(session)
-        }
+        await persistTurn(turn)
 
         await generateAssistantResponse(for: trimmed)
     }
 
     private func generateAssistantResponse(for text: String) async {
         isGeneratingResponse = true
-        phase = .thinking
-        avatarState = .thinking
-        liveAssistantTranscript = ""
-        subtitleSpeaker = .assistant
-        speechQueueBuffer = ""
+        let responseSessionID = activeSession?.id
+        activeResponseSessionID = responseSessionID
+        setPhase(.thinking)
+        setAvatarState(.thinking)
+        setLiveAssistantTranscript("")
+        setLipSyncFrame(.neutral)
+        speechChunker.reset(policy: currentSpeechChunkingPolicy)
+        lastAssistantTranscriptCommitAt = .distantPast
         lastAssistantResponse = ""
         didPersistCurrentAssistantTurn = false
 
         do {
+            try await activateConversationIfNeeded()
             let response = try await inferenceEngine.sendStreaming(text: text) { [weak self] token in
                 guard let self else { return }
+                guard self.shouldApplyResponseUpdates(for: responseSessionID) else { return }
                 self.lastAssistantResponse += token
-                self.liveAssistantTranscript = self.lastAssistantResponse
-                self.subtitleSpeaker = .assistant
+                self.commitLiveAssistantTranscript(with: token)
                 self.flushSpeechIfNeeded(using: token)
             }
 
-            liveAssistantTranscript = response
-            flushRemainingSpeech()
+            if shouldApplyResponseUpdates(for: responseSessionID) {
+                setLiveAssistantTranscript(response)
+                flushRemainingSpeech()
+                await persistAssistantTurnIfNeeded(text: response, wasInterrupted: false)
 
-            await persistAssistantTurnIfNeeded(text: response, wasInterrupted: false)
-
-            if isAssistantSpeaking == false {
-                phase = .listening
-                avatarState = inputMode == .liveVoice ? .listening : .idle
+                if isAssistantSpeaking == false {
+                    setPhase(.listening)
+                    setAvatarState(inputMode == .liveVoice ? .listening : .idle)
+                }
             }
         } catch {
-            if isCancellationError(error) {
-                let partial = liveAssistantTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                if partial.isEmpty == false {
-                    await persistAssistantTurnIfNeeded(text: partial, wasInterrupted: true)
+            if shouldApplyResponseUpdates(for: responseSessionID) {
+                if isCancellationError(error) {
+                    let partial = liveAssistantTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if partial.isEmpty == false {
+                        await persistAssistantTurnIfNeeded(text: partial, wasInterrupted: true)
+                    }
+                    setPhase(.interrupted)
+                    setAvatarState(.interrupted)
+                } else {
+                    setErrorMessage(error.localizedDescription)
+                    setPhase(.error(error.localizedDescription))
+                    setAvatarState(.error)
                 }
-                phase = .interrupted
-                avatarState = .interrupted
-            } else {
-                errorMessage = error.localizedDescription
-                phase = .error(error.localizedDescription)
-                avatarState = .error
             }
         }
-        isGeneratingResponse = false
+        finishResponseGeneration(for: responseSessionID)
+        if let pendingTranscript = dequeuePendingUserTranscript() {
+            await handleFinalTranscript(pendingTranscript)
+        }
     }
 
     private func interruptAssistantForBargeIn() {
+        guard isAssistantSpeaking || isGeneratingResponse else { return }
+        guard phase != .interrupted else { return }
+
+        pendingBargeInActivatedAt = nil
+        performanceTracer.markBargeInRequested()
+        lastSpeechInterruption = SpeechInterruptionSnapshot(
+            reason: .bargeIn,
+            assistantText: liveAssistantTranscript,
+            userText: liveUserTranscript,
+            happenedAt: .now
+        )
         if liveAssistantTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             Task { @MainActor in
                 await persistAssistantTurnIfNeeded(text: liveAssistantTranscript, wasInterrupted: true)
             }
         }
         inferenceEngine.cancelCurrentResponse()
-        speechPipeline.interruptSpeech()
-        phase = .interrupted
-        avatarState = .interrupted
+        speechPipeline.interruptSpeech(reason: .bargeIn)
+        performanceTracer.markBargeInStopped()
+        subtitleOverlayState.primarySpeaker = .user
+        if liveUserTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            subtitleOverlayState.liveText = liveUserTranscript
+        }
+        setPhase(.interrupted)
+        setAvatarState(.interrupted)
     }
 
     private func flushSpeechIfNeeded(using latestToken: String) {
-        speechQueueBuffer += latestToken
-        let shouldFlush = latestToken.contains(".") || latestToken.contains("?") || latestToken.contains("!") || speechQueueBuffer.count > 90
-        guard shouldFlush else { return }
-        let chunk = speechQueueBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        speechQueueBuffer = ""
+        guard let chunk = speechChunker.append(latestToken) else { return }
         Task {
-            await speechPipeline.speak(text: chunk, voiceStyle: currentVoiceStyle)
+            await speechPipeline.speak(chunks: [chunk], voiceStyle: currentVoiceStyle)
         }
     }
 
     private func flushRemainingSpeech() {
-        let chunk = speechQueueBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
-        speechQueueBuffer = ""
-        guard chunk.isEmpty == false else { return }
+        guard let chunk = speechChunker.flushRemaining() else { return }
         Task {
-            await speechPipeline.speak(text: chunk, voiceStyle: currentVoiceStyle)
+            await speechPipeline.speak(chunks: [chunk], voiceStyle: currentVoiceStyle)
         }
     }
 
@@ -298,13 +584,7 @@ final class ConversationOrchestrator: ObservableObject {
         didPersistCurrentAssistantTurn = true
         let turn = ConversationTurn(role: .assistant, text: trimmed, wasInterrupted: wasInterrupted)
         visibleTurns.append(turn)
-
-        if var session = activeSession {
-            session.turns.append(turn)
-            activeSession = session
-            try? await memoryStore.saveTurn(turn, sessionID: session.id)
-            try? await memoryStore.upsertSession(session)
-        }
+        await persistTurn(turn)
     }
 
     private func isCancellationError(_ error: Error) -> Bool {
@@ -313,5 +593,220 @@ final class ConversationOrchestrator: ObservableObject {
         }
         let nsError = error as NSError
         return nsError.domain == "LiteRTBridge" && nsError.code == 499
+    }
+
+    private func shouldApplyResponseUpdates(for sessionID: UUID?) -> Bool {
+        guard isCallActive else { return false }
+        guard activeResponseSessionID == sessionID else { return false }
+        return sessionBuffer?.id == sessionID || activeSession?.id == sessionID
+    }
+
+    private func finishResponseGeneration(for sessionID: UUID?) {
+        if activeResponseSessionID == sessionID {
+            activeResponseSessionID = nil
+        }
+        isGeneratingResponse = false
+        pendingBargeInActivatedAt = nil
+        if isAssistantSpeaking == false {
+            setLipSyncFrame(.neutral)
+        }
+    }
+
+    private func enqueuePendingUserTranscript(_ transcript: String) {
+        guard pendingUserTranscripts.last != transcript else { return }
+        pendingUserTranscripts.append(transcript)
+    }
+
+    private func dequeuePendingUserTranscript() -> String? {
+        guard isCallActive else {
+            pendingUserTranscripts.removeAll()
+            return nil
+        }
+        guard pendingUserTranscripts.isEmpty == false else { return nil }
+        return pendingUserTranscripts.removeFirst()
+    }
+
+    private func updateAudioLevel(_ rawValue: Double) {
+        let clamped = max(0, min(rawValue, 1))
+        let step = max(0.02, performanceGovernor.profile.audioLevelQuantizationStep)
+        let quantized = (clamped / step).rounded() * step
+        guard abs(audioLevel - quantized) > 0.001 else { return }
+        audioLevel = quantized
+    }
+
+    private func setPhase(_ newValue: CallPhase) {
+        guard phase != newValue else { return }
+        phase = newValue
+    }
+
+    private func setAvatarState(_ newValue: AvatarState) {
+        guard avatarState != newValue else { return }
+        avatarState = newValue
+    }
+
+    private func setActiveMode(_ newValue: ConversationMode?) {
+        guard activeMode != newValue else { return }
+        activeMode = newValue
+    }
+
+    private func setInputMode(_ newValue: CallInputMode) {
+        guard inputMode != newValue else { return }
+        inputMode = newValue
+    }
+
+    private func setLiveUserTranscript(_ newValue: String) {
+        guard liveUserTranscript != newValue else { return }
+        liveUserTranscript = newValue
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty == false {
+            subtitleOverlayState.primarySpeaker = .user
+            subtitleOverlayState.liveText = newValue
+        }
+    }
+
+    private func setLiveAssistantTranscript(_ newValue: String) {
+        guard liveAssistantTranscript != newValue else { return }
+        liveAssistantTranscript = newValue
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty == false {
+            performanceTracer.markFirstAssistantCaptionIfNeeded()
+            subtitleOverlayState.primarySpeaker = .assistant
+            subtitleOverlayState.liveText = newValue
+        }
+    }
+
+    private func commitLiveUserTranscript(_ newValue: String, force: Bool = false) {
+        guard shouldCommitTranscript(
+            currentValue: liveUserTranscript,
+            candidateValue: newValue,
+            latestCommitAt: lastUserTranscriptCommitAt,
+            minimumInterval: performanceGovernor.profile.userCaptionCommitInterval,
+            minimumDelta: 5,
+            force: force
+        ) else { return }
+
+        lastUserTranscriptCommitAt = .now
+        setLiveUserTranscript(newValue)
+    }
+
+    private func commitLiveAssistantTranscript(with latestToken: String, force: Bool = false) {
+        guard shouldCommitTranscript(
+            currentValue: liveAssistantTranscript,
+            candidateValue: lastAssistantResponse,
+            latestCommitAt: lastAssistantTranscriptCommitAt,
+            minimumInterval: performanceGovernor.profile.assistantCaptionCommitInterval,
+            minimumDelta: 10,
+            force: force || latestToken.contains(".") || latestToken.contains("?") || latestToken.contains("!") || latestToken.contains("\n")
+        ) else { return }
+
+        lastAssistantTranscriptCommitAt = .now
+        setLiveAssistantTranscript(lastAssistantResponse)
+    }
+
+    private func shouldCommitTranscript(
+        currentValue: String,
+        candidateValue: String,
+        latestCommitAt: Date,
+        minimumInterval: TimeInterval,
+        minimumDelta: Int,
+        force: Bool
+    ) -> Bool {
+        guard currentValue != candidateValue else { return false }
+        guard force == false else { return true }
+
+        let currentLength = currentValue.count
+        let candidateLength = candidateValue.count
+        let delta = abs(candidateLength - currentLength)
+        if currentLength == 0 || delta >= minimumDelta {
+            return Date().timeIntervalSince(latestCommitAt) >= minimumInterval
+        }
+        return false
+    }
+
+    private func setLatestFeedback(_ newValue: FeedbackReport?) {
+        guard latestFeedback != newValue else { return }
+        latestFeedback = newValue
+    }
+
+    private func setErrorMessage(_ newValue: String?) {
+        guard errorMessage != newValue else { return }
+        errorMessage = newValue
+    }
+
+    private func setIsCallActive(_ newValue: Bool) {
+        guard isCallActive != newValue else { return }
+        isCallActive = newValue
+    }
+
+    func syncSubtitleOverlay(mode: SubtitleOverlayMode, dragOffset: Double, currentHeight: Double) {
+        subtitleOverlayState.mode = mode
+        subtitleOverlayState.dragOffset = dragOffset
+        subtitleOverlayState.currentHeight = currentHeight
+    }
+
+    func recordSubtitleDragResponse(milliseconds: Int) {
+        performanceTracer.recordSubtitleDragResponse(milliseconds: milliseconds)
+    }
+
+    func recordKeyboardOpenLatency(milliseconds: Int) {
+        performanceTracer.recordKeyboardOpenLatency(milliseconds: milliseconds)
+    }
+
+    private func setLipSyncFrame(_ newValue: LipSyncFrame) {
+        guard lipSyncFrame != newValue else { return }
+        lipSyncFrame = newValue
+    }
+
+    private func persistTurn(_ turn: ConversationTurn) async {
+        guard var session = sessionBuffer ?? activeSession else { return }
+        session.turns.append(turn)
+        sessionBuffer = session
+        try? await memoryStore.upsertSession(session)
+    }
+
+    private func makeValidationSnapshot(for session: ConversationSession) -> ValidationRunSnapshot {
+        let metrics = session.speechMetrics.last
+        let measuredByID: [String: Int?] = [
+            "first-caption": metrics?.callToFirstCaptionMs,
+            "asr-partial": metrics?.speechToFirstPartialMs,
+            "speech-start": metrics?.captionToSpeechStartMs,
+            "barge-in-stop": metrics?.bargeInToStopMs,
+            "lip-sync-delay": metrics?.lipSyncDelayMs,
+            "subtitle-drag": metrics?.subtitleDragResponseMs,
+            "keyboard-open": metrics?.keyboardOpenLatencyMs
+        ]
+
+        let budgetResults = ReleaseValidationSpec.current.budgets.map { budget in
+            let measured = measuredByID[budget.id] ?? nil
+            return ValidationBudgetResult(
+                id: budget.id,
+                title: budget.title,
+                budgetMilliseconds: budget.budgetMilliseconds,
+                measuredMilliseconds: measured,
+                passed: measured.map { $0 <= budget.budgetMilliseconds }
+            )
+        }
+
+        var blockingIssues: [String] = []
+        if session.performanceSnapshot.speechRuntimeStatus.usesFallbackRuntime {
+            blockingIssues.append("Speech runtime still fell back to system services.")
+        }
+        let failedBudgets = budgetResults
+            .filter { $0.passed == false }
+            .map(\.title)
+        if failedBudgets.isEmpty == false {
+            blockingIssues.append("Validation budgets exceeded: \(failedBudgets.joined(separator: ", ")).")
+        }
+        if session.turns.contains(where: { $0.role == .assistant }) == false {
+            blockingIssues.append("No assistant turn was persisted for the call.")
+        }
+
+        return ValidationRunSnapshot(
+            specVersionLabel: ReleaseValidationSpec.current.versionLabel,
+            sessionID: session.id,
+            budgetResults: budgetResults,
+            blockingIssues: blockingIssues,
+            overallPassed: blockingIssues.isEmpty
+        )
     }
 }

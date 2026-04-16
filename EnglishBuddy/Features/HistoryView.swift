@@ -1,35 +1,115 @@
 import SwiftUI
 
+private struct ConversationThreadSummary: Identifiable {
+    let id: String
+    let sessions: [ConversationSession]
+    let threadState: ConversationThreadState?
+
+    var latestSession: ConversationSession {
+        sessions[0]
+    }
+
+    var character: CharacterProfile {
+        CharacterCatalog.profile(for: latestSession.characterID)
+    }
+
+    var scene: CharacterScene {
+        CharacterCatalog.scene(for: latestSession.sceneID, characterID: latestSession.characterID)
+    }
+
+    var language: LanguageProfile {
+        LanguageCatalog.profile(for: latestSession.languageProfileID)
+    }
+
+    var scenario: ScenarioPreset? {
+        latestSession.scenarioID.map { ScenarioCatalog.preset(for: $0, mode: latestSession.mode) }
+    }
+
+    var threadSummary: String {
+        if let summary = threadState?.summary.trimmingCharacters(in: .whitespacesAndNewlines), summary.isEmpty == false {
+            return summary
+        }
+        let summary = latestSession.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if summary.isEmpty == false {
+            return summary
+        }
+        return latestSession.turns.last?.text ?? "Continue this thread from the most recent local exchange."
+    }
+
+    var threadMission: String? {
+        if let mission = threadState?.nextMission, mission.isEmpty == false {
+            return mission
+        }
+        if let mission = threadState?.currentMission, mission.isEmpty == false {
+            return mission
+        }
+        if let mission = latestSession.learningPlanSnapshot?.mission, mission.isEmpty == false {
+            return mission
+        }
+        return nil
+    }
+
+    var continuationCue: String? {
+        threadState?.continuationCue
+    }
+}
+
 struct HistoryView: View {
-    @EnvironmentObject private var container: AppContainer
-    @State private var selectedSession: ConversationSession?
+    let container: AppContainer
+    @ObservedObject private var rootState: RootViewModel
+    @State private var selectedThread: ConversationThreadSummary?
+
+    init(container: AppContainer) {
+        self.container = container
+        _rootState = ObservedObject(wrappedValue: container.rootState)
+    }
 
     private var sessions: [ConversationSession] {
-        container.rootState.snapshot.sessions.sorted { $0.startedAt > $1.startedAt }
+        rootState.snapshot.sessions.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    private var visualStyle: VideoCallVisualStyle {
+        rootState.snapshot.companionSettings.visualStyle
+    }
+
+    private var threads: [ConversationThreadSummary] {
+        let threadStateByID = Dictionary(uniqueKeysWithValues: rootState.snapshot.threadStates.map { ($0.id, $0) })
+        return Dictionary(grouping: sessions, by: \.continuationThreadID)
+            .map { threadID, groupedSessions in
+                ConversationThreadSummary(
+                    id: threadID,
+                    sessions: groupedSessions.sorted { ($0.endedAt ?? $0.startedAt) > ($1.endedAt ?? $1.startedAt) },
+                    threadState: threadStateByID[threadID]
+                )
+            }
+            .sorted { ($0.latestSession.endedAt ?? $0.latestSession.startedAt) > ($1.latestSession.endedAt ?? $1.latestSession.startedAt) }
     }
 
     var body: some View {
         ZStack {
             AppCanvasBackground()
 
-            if sessions.isEmpty {
+            if threads.isEmpty {
                 ContentUnavailableView(
-                    "No calls yet",
+                    "No threads yet",
                     systemImage: "video.badge.waveform",
-                    description: Text("Your offline video-style conversations, missions, and debriefs will appear here after the first call.")
+                    description: Text("Your local character threads, missions, and debriefs will appear here after the first call.")
                 )
             } else {
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         historyHero
 
-                        ForEach(sessions) { session in
-                            Button {
-                                selectedSession = session
-                            } label: {
-                                SessionHistoryCard(session: session)
-                            }
-                            .buttonStyle(.plain)
+                        ForEach(threads) { thread in
+                            ThreadHistoryCard(
+                                thread: thread,
+                                openAction: {
+                                    selectedThread = thread
+                                },
+                                continueAction: {
+                                    Task { await continueThread(thread.latestSession) }
+                                }
+                            )
                         }
                     }
                     .padding(20)
@@ -38,24 +118,31 @@ struct HistoryView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("History")
-        .sheet(item: $selectedSession) { session in
-            SessionDetailView(session: session)
+        .sheet(item: $selectedThread) { thread in
+            ThreadDetailView(
+                thread: thread,
+                visualStyle: visualStyle,
+                continueAction: { session in
+                    selectedThread = nil
+                    Task { await continueThread(session) }
+                }
+            )
         }
     }
 
     private var historyHero: some View {
-        let completedTutor = sessions.filter { $0.mode == .tutor }.count
-        let completedChat = sessions.filter { $0.mode == .chat }.count
+        let activeCharacters = Set(threads.map(\.latestSession.characterID)).count
+        let completedTutor = threads.filter { $0.latestSession.mode == .tutor }.count
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Character memory stays on device, so every finished call keeps its scene, mission, and coaching trail.")
+            Text("Threads stay on device, so each character keeps its latest scene, mission, and continuation cue ready to resume.")
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(.white)
 
             HStack(spacing: 10) {
-                HistoryMetric(title: "Total Calls", value: "\(sessions.count)")
-                HistoryMetric(title: "Chat", value: "\(completedChat)")
-                HistoryMetric(title: "Tutor", value: "\(completedTutor)")
+                HistoryMetric(title: "Threads", value: "\(threads.count)")
+                HistoryMetric(title: "Characters", value: "\(activeCharacters)")
+                HistoryMetric(title: "Tutor Threads", value: "\(completedTutor)")
             }
         }
         .padding(22)
@@ -70,6 +157,26 @@ struct HistoryView: View {
                 )
         )
     }
+
+    private func continueThread(_ session: ConversationSession) async {
+        do {
+            try await rootState.updateCompanionSettings { settings in
+                settings.selectedCharacterID = CharacterCatalog.profile(for: session.characterID).id
+                settings.selectedSceneID = CharacterCatalog.scene(for: session.sceneID, characterID: session.characterID).id
+                settings.conversationLanguageID = session.languageProfileID
+                settings.selectedVoiceBundleID = session.voiceBundleID
+                settings.warmupCompleted = true
+            }
+            rootState.showingHistory = false
+            await rootState.startCall(
+                session.mode,
+                preferredScenarioID: session.scenarioID,
+                continuationAnchor: session
+            )
+        } catch {
+            rootState.globalError = error.localizedDescription
+        }
+    }
 }
 
 private struct HistoryMetric: View {
@@ -83,58 +190,67 @@ private struct HistoryMetric: View {
                 .foregroundStyle(.white)
             Text(title)
                 .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.76))
+                .foregroundStyle(.white.opacity(0.84))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.12))
+                .fill(Color.black.opacity(0.28))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
         )
     }
 }
 
-private struct SessionHistoryCard: View {
-    let session: ConversationSession
-
-    private var character: CharacterProfile { CharacterCatalog.profile(for: session.characterID) }
-    private var scene: CharacterScene { CharacterCatalog.scene(for: session.sceneID, characterID: character.id) }
-    private var scenario: ScenarioPreset? {
-        session.scenarioID.map { ScenarioCatalog.preset(for: $0, mode: session.mode) }
-    }
+private struct ThreadHistoryCard: View {
+    let thread: ConversationThreadSummary
+    let openAction: () -> Void
+    let continueAction: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("\(character.displayName) • \(session.mode.title)")
+                    Text("\(thread.character.displayName) • \(thread.latestSession.mode.title)")
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
-                    Text(scene.title)
+                    Text(thread.scene.title)
                         .font(.system(.caption, design: .rounded, weight: .semibold))
                         .foregroundStyle(Color(red: 0.49, green: 0.43, blue: 0.38))
+                    Text("\(thread.language.displayName) • \(thread.sessions.count) sessions")
+                        .font(.system(.caption2, design: .rounded, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.46, green: 0.42, blue: 0.38))
                 }
 
                 Spacer()
 
-                Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(thread.latestSession.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
 
-            if let scenario {
+            if let scenario = thread.scenario {
                 Text(scenario.title)
                     .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.89, green: 0.43, blue: 0.27))
+                    .foregroundStyle(Color(red: 0.50, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
             }
 
-            Text(session.summary.isEmpty ? "This conversation finished locally and is ready to review." : session.summary)
+            Text(thread.threadSummary)
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if let learningPlan = session.learningPlanSnapshot {
-                Text(learningPlan.mission)
+            if let mission = thread.threadMission {
+                Text(mission)
                     .font(.system(.caption, design: .rounded, weight: .semibold))
                     .foregroundStyle(Color(red: 0.31, green: 0.28, blue: 0.34))
                     .padding(.horizontal, 12)
@@ -145,18 +261,58 @@ private struct SessionHistoryCard: View {
                     )
             }
 
+            if let continuationCue = thread.continuationCue, continuationCue.isEmpty == false {
+                Text(continuationCue)
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(Color(red: 0.44, green: 0.40, blue: 0.39))
+            }
+
             HStack {
                 Label(durationText, systemImage: "clock")
                 Spacer()
-                Label("\(session.turns.count) turns", systemImage: "text.bubble")
+                Label("\(thread.latestSession.turns.count) turns", systemImage: "text.bubble")
             }
             .font(.system(.caption, design: .rounded, weight: .semibold))
             .foregroundStyle(Color(red: 0.44, green: 0.40, blue: 0.39))
 
-            if let goalSummary = session.feedbackReport?.goalCompletionSummary, goalSummary.isEmpty == false {
+            if let goalSummary = thread.latestSession.feedbackReport?.goalCompletionSummary, goalSummary.isEmpty == false {
                 Text(goalSummary)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(Color(red: 0.29, green: 0.26, blue: 0.31))
+            }
+
+            if let nextTheme = thread.latestSession.feedbackReport?.nextThemeSuggestion, nextTheme.isEmpty == false {
+                Text(nextTheme)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.88, green: 0.43, blue: 0.27))
+            }
+
+            HStack(spacing: 10) {
+                Button("Review Thread", action: openAction)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(red: 0.97, green: 0.95, blue: 0.92))
+                    )
+
+                Button(action: continueAction) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "video.fill")
+                        Text("Continue Thread")
+                    }
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(red: 0.92, green: 0.42, blue: 0.27))
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(18)
@@ -171,7 +327,7 @@ private struct SessionHistoryCard: View {
     }
 
     private var durationText: String {
-        let totalMinutes = Int(session.duration / 60)
+        let totalMinutes = Int(thread.latestSession.duration / 60)
         if totalMinutes > 0 {
             return "\(totalMinutes) min"
         }
@@ -179,14 +335,174 @@ private struct SessionHistoryCard: View {
     }
 }
 
+private struct ThreadDetailView: View {
+    let thread: ConversationThreadSummary
+    let visualStyle: VideoCallVisualStyle
+    let continueAction: (ConversationSession) -> Void
+
+    @State private var selectedSession: ConversationSession?
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AppCanvasBackground()
+
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            HistoryCharacterPreview(
+                                character: thread.character,
+                                scene: thread.scene,
+                                visualStyle: visualStyle
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.bottom, 2)
+
+                            Text("\(thread.character.displayName) • \(thread.scenario?.title ?? thread.latestSession.mode.title)")
+                                .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color.white.opacity(0.82))
+
+                            Text(thread.threadSummary)
+                                .font(.system(.title3, design: .rounded, weight: .black))
+                                .foregroundStyle(.white)
+
+                            if let mission = thread.threadMission {
+                                DetailBadge(text: mission)
+                            }
+
+                            if let continuationCue = thread.continuationCue, continuationCue.isEmpty == false {
+                                Text(continuationCue)
+                                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.84))
+                            }
+
+                            HStack(spacing: 10) {
+                                DetailBadge(text: thread.scene.title)
+                                DetailBadge(text: thread.language.displayName)
+                                DetailBadge(text: "\(thread.sessions.count) sessions")
+                            }
+
+                            Button {
+                                continueAction(thread.latestSession)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "video.fill")
+                                    Text("Continue This Thread")
+                                        .font(.system(.headline, design: .rounded, weight: .bold))
+                                    Spacer()
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 14)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                        .fill(Color.black.opacity(0.24))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(22)
+                        .background(
+                            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color(red: 0.15, green: 0.21, blue: 0.33), Color(red: 0.58, green: 0.33, blue: 0.24)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Sessions in this thread")
+                                .font(.system(.title3, design: .rounded, weight: .bold))
+
+                            ForEach(thread.sessions) { session in
+                                Button {
+                                    selectedSession = session
+                                } label: {
+                                    SessionThreadCard(session: session)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .detailPanel()
+                    }
+                    .padding(20)
+                }
+            }
+            .navigationTitle("Thread")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $selectedSession) { session in
+                SessionDetailView(
+                    session: session,
+                    visualStyle: visualStyle,
+                    continueAction: {
+                        selectedSession = nil
+                        continueAction(session)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private struct SessionThreadCard: View {
+    let session: ConversationSession
+
+    private var scenario: ScenarioPreset? {
+        session.scenarioID.map { ScenarioCatalog.preset(for: $0, mode: session.mode) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.49, green: 0.43, blue: 0.38))
+                Spacer()
+                Text(session.mode.title)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.50, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
+            }
+
+            if let scenario {
+                Text(scenario.title)
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+            }
+
+            Text(session.summary.isEmpty ? "Session saved locally." : session.summary)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+        )
+    }
+}
+
 private struct SessionDetailView: View {
     let session: ConversationSession
+    let visualStyle: VideoCallVisualStyle
+    var continueAction: (() -> Void)? = nil
 
     private var character: CharacterProfile { CharacterCatalog.profile(for: session.characterID) }
     private var scene: CharacterScene { CharacterCatalog.scene(for: session.sceneID, characterID: character.id) }
     private var scenario: ScenarioPreset? {
         session.scenarioID.map { ScenarioCatalog.preset(for: $0, mode: session.mode) }
     }
+    private var language: LanguageProfile { LanguageCatalog.profile(for: session.languageProfileID) }
 
     var body: some View {
         NavigationStack {
@@ -210,6 +526,14 @@ private struct SessionDetailView: View {
 
     private var detailHero: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HistoryCharacterPreview(
+                character: character,
+                scene: scene,
+                visualStyle: visualStyle
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.bottom, 2)
+
             Text("\(character.displayName) in \(scene.title)")
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(Color.white.opacity(0.82))
@@ -223,7 +547,27 @@ private struct SessionDetailView: View {
                 if let scenario {
                     DetailBadge(text: scenario.title)
                 }
+                DetailBadge(text: language.displayName)
                 DetailBadge(text: "\(session.turns.count) turns")
+            }
+
+            if let continueAction {
+                Button(action: continueAction) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "video.fill")
+                        Text("Continue From This Session")
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                        Spacer()
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(Color.black.opacity(0.24))
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(22)
@@ -269,6 +613,12 @@ private struct SessionDetailView: View {
                 if feedback.nextMission.isEmpty == false {
                     DetailRow(title: "Next Mission", content: feedback.nextMission)
                 }
+                if feedback.nextThemeSuggestion.isEmpty == false {
+                    DetailRow(title: "Next Theme", content: feedback.nextThemeSuggestion)
+                }
+                if feedback.continuationCue.isEmpty == false {
+                    DetailRow(title: "Continuation Cue", content: feedback.continuationCue)
+                }
                 if feedback.carryOverVocabulary.isEmpty == false {
                     DetailRow(title: "Carry-over Vocabulary", content: feedback.carryOverVocabulary.joined(separator: " • "))
                 }
@@ -293,7 +643,17 @@ private struct SessionDetailView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(turn.role == .user ? "You" : character.displayName)
                         .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(turn.role == .user ? Color(red: 0.23, green: 0.48, blue: 0.43) : Color(red: 0.88, green: 0.43, blue: 0.27))
+                        .foregroundStyle(turn.role == .user ? Color(red: 0.18, green: 0.42, blue: 0.37) : Color(red: 0.50, green: 0.24, blue: 0.10))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(
+                                    turn.role == .user
+                                        ? Color(red: 0.83, green: 0.93, blue: 0.89)
+                                        : Color(red: 0.99, green: 0.92, blue: 0.85)
+                                )
+                        )
                     Text(turn.text)
                         .font(.system(.body, design: .rounded))
                         .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
@@ -302,11 +662,38 @@ private struct SessionDetailView: View {
                 .padding(14)
                 .background(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(turn.role == .user ? Color(red: 0.89, green: 0.96, blue: 0.93) : Color.white.opacity(0.94))
+                        .fill(
+                            turn.role == .user
+                                ? Color(red: 0.89, green: 0.96, blue: 0.93)
+                                : Color(red: 0.99, green: 0.96, blue: 0.93)
+                        )
                 )
             }
         }
         .detailPanel()
+    }
+}
+
+private struct HistoryCharacterPreview: View, Equatable {
+    let character: CharacterProfile
+    let scene: CharacterScene
+    let visualStyle: VideoCallVisualStyle
+
+    var body: some View {
+        CharacterStageSurface(
+            character: character,
+            scene: scene,
+            visualStyle: visualStyle,
+            emphasis: .preview,
+            surfaceKind: .historyPreview,
+            size: CGSize(width: 164, height: 212),
+            isAnimated: false,
+            showsBackdrop: false,
+            shadowColor: .black.opacity(0.18),
+            shadowRadius: 22,
+            shadowYOffset: 12,
+            groundShadowWidth: 112
+        )
     }
 }
 
@@ -319,7 +706,14 @@ private struct DetailBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(Capsule().fill(Color.white.opacity(0.14)))
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.24))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+            )
     }
 }
 

@@ -34,4 +34,24 @@ final class FeedbackGeneratorTests: XCTestCase {
         XCTAssertTrue(summary.summary.contains("travel") || summary.summary.contains("daily life"))
         XCTAssertEqual(summary.keyMoments.count, 3)
     }
+
+    func testFeedbackCarriesVoiceBundleAndReferenceAccentFromSession() {
+        let generator = FeedbackGenerator()
+        let session = ConversationSession(
+            mode: .tutor,
+            turns: [
+                ConversationTurn(role: .user, text: "I want to improve my pronunciation in British English."),
+                ConversationTurn(role: .assistant, text: "Let's slow down and make each sentence clearer.")
+            ],
+            voiceBundleID: "lyra-voice",
+            voiceAccent: .british
+        )
+
+        let report = generator.generateFeedback(for: session, learner: .default, mode: .tutor)
+
+        XCTAssertEqual(report.voiceBundleID, "lyra-voice")
+        XCTAssertEqual(report.voiceDisplayName, "British Female")
+        XCTAssertEqual(report.referenceAccent, EnglishAccent.british)
+        XCTAssertEqual(report.referenceAccentDisplayName, EnglishAccent.british.displayName)
+    }
 }

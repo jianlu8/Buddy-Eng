@@ -13,7 +13,10 @@ public:
   LiteRTShim();
   ~LiteRTShim();
 
-  bool Prepare(const std::string& model_path, bool prefer_gpu, std::string* error_message);
+  bool Prepare(const std::string& model_path,
+               const std::string& cache_directory_path,
+               bool prefer_gpu,
+               std::string* error_message);
   bool StartConversation(const std::string& system_prompt,
                          const std::string& memory_context,
                          const std::string& mode,
@@ -28,7 +31,6 @@ private:
   struct StreamState;
 
   std::string BuildStubResponse(const std::string& input_text) const;
-  std::string BuildCombinedSystemPrompt() const;
   void ResetRuntimeObjects();
   void EmitStubResponseAsync(const std::string& input_text, StreamCallback callback);
 
@@ -36,6 +38,7 @@ private:
   std::shared_ptr<StreamState> current_stream_;
   mutable std::mutex mutex_;
   std::string model_path_;
+  std::string cache_directory_path_;
   std::string system_prompt_;
   std::string memory_context_;
   std::string mode_ = "chat";

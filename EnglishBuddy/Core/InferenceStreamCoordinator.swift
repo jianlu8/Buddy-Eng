@@ -43,7 +43,8 @@ final class InferenceStreamCoordinator: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 let shouldTimeout: Bool = self.lock.withLock {
                     guard self.finished == false else { return false }
-                    return Date().timeIntervalSince(self.lastActivity) >= 25
+                    let timeoutSeconds = Double(self.timeoutNanoseconds) / 1_000_000_000
+                    return Date().timeIntervalSince(self.lastActivity) >= timeoutSeconds
                 }
                 if shouldTimeout {
                     self.fail(StreamCoordinatorError.timedOut)

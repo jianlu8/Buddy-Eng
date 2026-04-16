@@ -1,7 +1,13 @@
 import SwiftUI
 
 struct RootView: View {
-    @EnvironmentObject private var container: AppContainer
+    let container: AppContainer
+    @ObservedObject private var rootState: RootViewModel
+
+    init(container: AppContainer) {
+        self.container = container
+        _rootState = ObservedObject(wrappedValue: container.rootState)
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -12,75 +18,118 @@ struct RootView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .sheet(isPresented: $container.rootState.showingHistory) {
+            .sheet(isPresented: $rootState.showingHistory) {
                 NavigationStack {
-                    HistoryView()
-                        .environmentObject(container)
+                    HistoryView(container: container)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button("Done") {
-                                    container.rootState.showingHistory = false
+                                    rootState.showingHistory = false
                                 }
                             }
                         }
                 }
             }
-            .sheet(isPresented: $container.rootState.showingSettings) {
+            .sheet(isPresented: $rootState.showingSettings) {
                 NavigationStack {
-                    SettingsView()
-                        .environmentObject(container)
+                    SettingsView(container: container)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button("Done") {
-                                    container.rootState.showingSettings = false
+                                    rootState.showingSettings = false
                                 }
                             }
                         }
                 }
             }
-            .sheet(isPresented: $container.rootState.showingPersonalizationPrompt) {
-                PersonalizationSheet()
-                    .environmentObject(container)
+            .sheet(isPresented: $rootState.showingPersonalizationPrompt) {
+                PersonalizationSheet(container: container)
             }
-            .fullScreenCover(isPresented: $container.rootState.showingCall) {
-                CallView()
-                    .environmentObject(container)
+            .fullScreenCover(isPresented: $rootState.showingCall) {
+                CallView(
+                    performanceGovernor: container.performanceGovernor,
+                    rootState: rootState,
+                    orchestrator: container.orchestrator,
+                    context: CallPresentationContext.resolve(
+                        rootState: rootState,
+                        orchestrator: container.orchestrator
+                    )
+                )
             }
-            .sheet(isPresented: $container.rootState.showingFeedback) {
+            .sheet(isPresented: $rootState.showingFeedback) {
                 if let report = container.orchestrator.latestFeedback {
+                    let session = container.orchestrator.activeSession
                     FeedbackView(
                         report: report,
-                        mode: container.orchestrator.activeSession?.mode ?? container.rootState.launchingMode
+                        mode: session?.mode ?? rootState.launchingMode,
+                        character: session.map { CharacterCatalog.profile(for: $0.characterID) },
+                        scene: session.map { CharacterCatalog.scene(for: $0.sceneID, characterID: $0.characterID) },
+                        scenario: session?.scenarioID.flatMap { scenarioID in
+                            guard let session else { return nil }
+                            return ScenarioCatalog.preset(for: scenarioID, mode: session.mode)
+                        },
+                        learningPlan: session?.learningPlanSnapshot,
+                        visualStyle: rootState.snapshot.companionSettings.visualStyle,
+                        continueThreadAction: session.map { session in
+                            {
+                                Task { await reopenCall(from: session, preferredScenarioID: session.scenarioID, continuationAnchor: session) }
+                            }
+                        },
+                        replayMissionAction: session.map { session in
+                            {
+                                Task { await reopenCall(from: session, preferredScenarioID: session.scenarioID, continuationAnchor: session) }
+                            }
+                        },
+                        nextThemeAction: session.map { session in
+                            {
+                                Task {
+                                    await reopenCall(
+                                        from: session,
+                                        preferredScenarioID: alternateScenarioID(for: session),
+                                        continuationAnchor: session
+                                    )
+                                }
+                            }
+                        }
                     ) {
-                        container.rootState.showingFeedback = false
+                        rootState.showingFeedback = false
                         container.orchestrator.clearLatestFeedback()
                     }
                 }
             }
             .alert("Error", isPresented: Binding(
-                get: { container.rootState.globalError != nil },
+                get: { rootState.globalError != nil },
                 set: { newValue in
                     if newValue == false {
-                        container.rootState.globalError = nil
+                        rootState.globalError = nil
                     }
                 })
             ) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(container.rootState.globalError ?? "Unknown error")
+                Text(rootState.globalError ?? "Unknown error")
+            }
+            .onChange(of: rootState.snapshot.companionSettings) { _, newValue in
+                container.syncPerformanceProfile(using: newValue)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+                container.syncPerformanceProfile(using: rootState.snapshot.companionSettings)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+                container.syncPerformanceProfile(using: rootState.snapshot.companionSettings)
             }
         }
+        .environmentObject(container.performanceGovernor)
     }
 
     @ViewBuilder
     private var content: some View {
-        switch container.rootState.bootstrapState {
+        switch rootState.bootstrapState {
         case let .booting(message):
             LaunchBootView(message: message)
         case .ready:
             NavigationStack {
-                HomeView()
-                    .environmentObject(container)
+                HomeView(container: container)
                     .toolbarBackground(.hidden, for: .navigationBar)
             }
         case let .fatalConfigurationError(message):
@@ -89,27 +138,65 @@ struct RootView: View {
             }
         }
     }
+
+    private func reopenCall(
+        from session: ConversationSession,
+        preferredScenarioID: String?,
+        continuationAnchor: ConversationSession?
+    ) async {
+        do {
+            try await rootState.updateCompanionSettings { settings in
+                settings.selectedCharacterID = CharacterCatalog.profile(for: session.characterID).id
+                settings.selectedSceneID = CharacterCatalog.scene(for: session.sceneID, characterID: session.characterID).id
+                settings.conversationLanguageID = session.languageProfileID
+                settings.selectedVoiceBundleID = session.voiceBundleID
+                settings.warmupCompleted = true
+            }
+            rootState.showingFeedback = false
+            container.orchestrator.clearLatestFeedback()
+            await rootState.startCall(
+                session.mode,
+                preferredScenarioID: preferredScenarioID,
+                continuationAnchor: continuationAnchor
+            )
+        } catch {
+            rootState.globalError = error.localizedDescription
+        }
+    }
+
+    private func alternateScenarioID(for session: ConversationSession) -> String? {
+        let presets = ScenarioCatalog.presets(for: session.mode)
+        guard presets.isEmpty == false else { return session.scenarioID }
+
+        if let currentID = session.scenarioID,
+           let currentIndex = presets.firstIndex(where: { $0.id == currentID }) {
+            return presets[(currentIndex + 1) % presets.count].id
+        }
+
+        return ScenarioCatalog.recommended(
+            for: rootState.snapshot.learnerProfile,
+            mode: session.mode
+        ).id
+    }
 }
 
 private struct LaunchBootView: View {
     let message: String
 
-    private var character: CharacterProfile {
-        CharacterCatalog.flagship
-    }
-
     var body: some View {
         VStack(spacing: 28) {
             Spacer()
 
-            MiraAvatarView(
-                state: .thinking,
-                audioLevel: 0.08,
-                emphasis: .hero,
-                characterID: character.id,
-                sceneID: character.defaultSceneID
-            )
-                .frame(width: 260, height: 320)
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color.white.opacity(0.72))
+                    .frame(width: 150, height: 178)
+                    .shadow(color: .black.opacity(0.08), radius: 24, y: 12)
+
+                Image(systemName: "person.crop.rectangle.stack.fill")
+                    .font(.system(size: 52, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.22, green: 0.19, blue: 0.24))
+            }
 
             VStack(spacing: 10) {
                 Text("EnglishBuddy")

@@ -6,18 +6,22 @@ struct FeedbackGenerator {
         learner: LearnerProfile,
         mode: ConversationMode
     ) -> FeedbackReport {
-        let userTurns = session.turns.filter { $0.role == .user }
-        let fullText = userTurns.map(\.text).joined(separator: " ").lowercased()
-        let grammar = detectGrammarIssues(in: userTurns).prefix(3)
-        let vocabulary = detectVocabularySuggestions(in: userTurns).prefix(3)
-        let pronunciation = detectPronunciationTips(in: fullText).prefix(3)
-        let frequentExpressions = extractFrequentExpressions(from: userTurns)
-        let nextTopics = suggestNextTopics(from: fullText, goal: learner.learningGoal, mode: mode)
-        let carryOverVocabulary = extractCarryOverVocabulary(from: userTurns)
+        let context = FeedbackContext(session: session, learner: learner, mode: mode)
+        let voiceBundle = VoiceCatalog.bundle(
+            for: session.voiceBundleID,
+            characterID: session.characterID,
+            languageID: session.languageProfileID
+        )
+        let grammar = detectGrammarIssues(in: context.userTurns).prefix(3)
+        let vocabulary = detectVocabularySuggestions(in: context.userTurns).prefix(3)
+        let pronunciation = detectPronunciationTips(in: context.fullText).prefix(3)
+        let frequentExpressions = extractFrequentExpressions(from: context.userTurns)
+        let nextTopics = suggestNextTopics(from: context.fullText, goal: learner.learningGoal, mode: mode)
+        let carryOverVocabulary = extractCarryOverVocabulary(from: context.userTurns)
         let pronunciationHighlights = makePronunciationHighlights(
             session: session,
             pronunciation: Array(pronunciation),
-            fullText: fullText
+            fullText: context.fullText
         )
         let nextMission = makeNextMission(
             session: session,
@@ -25,11 +29,13 @@ struct FeedbackGenerator {
             mode: mode,
             carryOverVocabulary: carryOverVocabulary
         )
+        let nextThemeSuggestion = makeNextThemeSuggestion(session: session, nextTopics: nextTopics)
+        let continuationCue = makeContinuationCue(session: session, userTurns: context.userTurns)
         let goalCompletionSummary = makeGoalCompletionSummary(
             session: session,
             learner: learner,
             mode: mode,
-            userTurns: userTurns
+            userTurns: context.userTurns
         )
 
         return FeedbackReport(
@@ -41,7 +47,13 @@ struct FeedbackGenerator {
             pronunciationHighlights: pronunciationHighlights,
             carryOverVocabulary: carryOverVocabulary,
             nextMission: nextMission,
-            goalCompletionSummary: goalCompletionSummary
+            nextThemeSuggestion: nextThemeSuggestion,
+            continuationCue: continuationCue,
+            goalCompletionSummary: goalCompletionSummary,
+            voiceBundleID: voiceBundle.id,
+            voiceDisplayName: voiceBundle.displayName,
+            referenceAccent: voiceBundle.accent,
+            referenceAccentDisplayName: voiceBundle.accent.displayName
         )
     }
 
@@ -211,6 +223,40 @@ struct FeedbackGenerator {
         return "Next call, keep the same character and turn one short answer into a longer personal story."
     }
 
+    private func makeNextThemeSuggestion(session: ConversationSession, nextTopics: [String]) -> String {
+        if let scenarioCategory = session.scenarioCategory {
+            switch scenarioCategory {
+            case .freeTalk:
+                return nextTopics.first ?? "Stay with the same character and open one adjacent daily-life theme."
+            case .lectureStyleExplanation:
+                return "Ask for one new explanation, then paraphrase it back in your own words."
+            case .roleplayPractice:
+                return "Run the same roleplay again with one added constraint."
+            case .gameThemeChallenge:
+                return "Keep the same playful theme and answer faster with less hesitation."
+            case .pronunciationDrill:
+                return "Repeat the target phrase, then bring it into a longer sentence."
+            case .vocabularyCarryOver:
+                return "Reuse the saved vocabulary in a fresh topic instead of repeating the same example."
+            }
+        }
+        return nextTopics.first ?? "Stay with the same character and open one adjacent theme next time."
+    }
+
+    private func makeContinuationCue(session: ConversationSession, userTurns: [ConversationTurn]) -> String {
+        let anchor = userTurns.last?.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let carryOver = session.learningPlanSnapshot?.carryOverVocabulary.prefix(2).joined(separator: ", ") ?? ""
+        let scenarioTitle = session.scenarioID.map { ScenarioCatalog.preset(for: $0, mode: session.mode).title } ?? "this thread"
+
+        if let anchor, anchor.isEmpty == false, carryOver.isEmpty == false {
+            return "Resume \(scenarioTitle) by revisiting \"\(shorten(anchor, maxLength: 60))\" and reuse \(carryOver)."
+        }
+        if let anchor, anchor.isEmpty == false {
+            return "Resume \(scenarioTitle) from \"\(shorten(anchor, maxLength: 60))\"."
+        }
+        return "Resume the same character thread and extend the previous topic by one more detail."
+    }
+
     private func makeGoalCompletionSummary(
         session: ConversationSession,
         learner: LearnerProfile,
@@ -253,5 +299,21 @@ private extension Array where Element == String {
     func orderedUnique() -> [String] {
         var seen = Set<String>()
         return filter { seen.insert($0).inserted }
+    }
+}
+
+private struct FeedbackContext {
+    let session: ConversationSession
+    let learner: LearnerProfile
+    let mode: ConversationMode
+    let userTurns: [ConversationTurn]
+    let fullText: String
+
+    init(session: ConversationSession, learner: LearnerProfile, mode: ConversationMode) {
+        self.session = session
+        self.learner = learner
+        self.mode = mode
+        userTurns = session.turns.filter { $0.role == .user }
+        fullText = userTurns.map(\.text).joined(separator: " ").lowercased()
     }
 }

@@ -36,7 +36,7 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             return .unavailable(reason)
         }
         if selectedModel.isBundledBase {
-            return .unavailable("\(selectedModel.displayName) is missing from this app build. Reinstall the app package that includes the bundled base model.")
+            return .unavailable("\(selectedModel.displayName) is unavailable. Reinstall a build that embeds the bundled base model or stage the bundled base asset into Application Support.")
         }
         return .unavailable("\(selectedModel.displayName) is not available for offline inference yet.")
     }
@@ -124,15 +124,15 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         selectionState.selectedModelID = descriptor.id
         try filesystem.prepareDirectories()
 
-        guard let embeddedURL = embeddedModelURL(for: descriptor) else {
+        guard let bundledBaseURL = bundledBaseURL(for: descriptor) else {
             throw ModelManagerError.missingBundledModel(descriptor.displayName)
         }
 
         try validateInstalledModel(
             descriptor: descriptor,
-            at: embeddedURL,
-            recalculateChecksum: false,
-            source: .bundledApp
+            at: bundledBaseURL,
+            recalculateChecksum: bundledBaseURL.path != embeddedModelURL(for: descriptor)?.path,
+            source: bundledBaseURL.path == embeddedModelURL(for: descriptor)?.path ? .bundledApp : .downloaded
         )
         normalizeSelection()
         try await persistState()
@@ -395,6 +395,14 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         return embeddedURL
     }
 
+    private func bundledBaseURL(for descriptor: ModelDescriptor) -> URL? {
+        if let embeddedURL = embeddedModelURL(for: descriptor) {
+            return embeddedURL
+        }
+
+        return localModelURL(for: descriptor)
+    }
+
     private func validateInstalledModel(
         descriptor: ModelDescriptor,
         at url: URL,
@@ -412,11 +420,18 @@ final class ModelDownloadManager: NSObject, ObservableObject {
             }
             installRecord.checksum = metadata.checksum
         } else {
-            guard currentSize == descriptor.expectedFileSizeBytes else {
-                throw ModelManagerError.sizeMismatch(expected: descriptor.expectedFileSizeBytes, actual: currentSize)
+            let trustedLocalMetadata = try loadTrustedLocalModelMetadataIfAvailable(
+                for: descriptor,
+                at: url
+            )
+            let expectedSize = trustedLocalMetadata?.expectedFileSizeBytes ?? descriptor.expectedFileSizeBytes
+            guard currentSize == expectedSize else {
+                throw ModelManagerError.sizeMismatch(expected: expectedSize, actual: currentSize)
             }
 
-            if recalculateChecksum || installRecord.checksum == nil {
+            if let trustedLocalMetadata {
+                installRecord.checksum = trustedLocalMetadata.checksum ?? descriptor.checksum
+            } else if recalculateChecksum || installRecord.checksum == nil {
                 let checksum = try Self.calculateSHA256(for: url)
                 if let expectedChecksum = descriptor.checksum, expectedChecksum != checksum {
                     throw ModelManagerError.checksumMismatch(expected: expectedChecksum, actual: checksum)
@@ -433,6 +448,24 @@ final class ModelDownloadManager: NSObject, ObservableObject {
         installRecord.artifactSource = source
         installRecord.resolvedURL = url
         installationRecords[descriptor.id] = installRecord
+    }
+
+    private func loadTrustedLocalModelMetadataIfAvailable(
+        for descriptor: ModelDescriptor,
+        at url: URL
+    ) throws -> EmbeddedModelMetadata? {
+        guard descriptor.isBundledBase else { return nil }
+        guard url == localModelURL(for: descriptor) else { return nil }
+
+        let metadataURL = filesystem.localModelMetadataURL(for: descriptor)
+        guard FileManager.default.fileExists(atPath: metadataURL.path) else { return nil }
+
+        let data = try Data(contentsOf: metadataURL)
+        let metadata = try JSONDecoder().decode(EmbeddedModelMetadata.self, from: data)
+        if let modelID = metadata.modelID, modelID != descriptor.id {
+            throw ModelManagerError.embeddedMetadataMismatch(expected: descriptor.id, actual: modelID)
+        }
+        return metadata
     }
 
     private func loadEmbeddedModelMetadata(for descriptor: ModelDescriptor) throws -> EmbeddedModelMetadata {

@@ -17,20 +17,27 @@ final class AppLaunchProvisioner {
     }
 
     func prepareApp() async -> BootstrapReadinessState {
+        StartupTrace.mark("AppLaunchProvisioner.prepareApp.begin")
         do {
             try await memoryStore.load()
+            StartupTrace.mark("AppLaunchProvisioner.prepareApp.memoryLoaded")
             try await modelManager.ensureBundledBaseReady()
+            StartupTrace.mark("AppLaunchProvisioner.prepareApp.bundledBaseReady")
             await modelManager.refreshInstallState()
+            StartupTrace.mark("AppLaunchProvisioner.prepareApp.installStateRefreshed")
 
             if case let .unavailable(message) = modelManager.activeModelReadiness {
                 let recovered = await modelManager.recoverBundledBaseIfPossible()
                 if recovered == false {
+                    StartupTrace.mark("AppLaunchProvisioner.prepareApp.fatalUnavailable \(message)")
                     return .fatalConfigurationError(message)
                 }
             }
 
+            StartupTrace.mark("AppLaunchProvisioner.prepareApp.ready")
             return .ready
         } catch {
+            StartupTrace.mark("AppLaunchProvisioner.prepareApp.error \(error.localizedDescription)")
             return .fatalConfigurationError(error.localizedDescription)
         }
     }

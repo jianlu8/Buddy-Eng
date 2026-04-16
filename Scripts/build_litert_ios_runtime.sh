@@ -50,6 +50,12 @@ if [[ "${needs_rebuild}" -eq 0 ]]; then
   exit 0
 fi
 
+if [[ "${ENGLISHBUDDY_RUN_HEAVY_PREBUILD:-0}" != "1" ]]; then
+  echo "LiteRT runtime artifacts are missing or stale, but heavy prebuild is disabled." >&2
+  echo "Run Scripts/release_prep.sh or rebuild with ENGLISHBUDDY_RUN_HEAVY_PREBUILD=1." >&2
+  exit 1
+fi
+
 build_variant() {
   local config="$1"
   (cd "${LITERT_DIR}" && bazelisk build --config="${config}" "${RUNTIME_TARGET}" >/dev/null)

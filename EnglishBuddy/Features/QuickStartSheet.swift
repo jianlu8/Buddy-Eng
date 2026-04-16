@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct PersonalizationSheet: View {
-    @EnvironmentObject private var container: AppContainer
+    let container: AppContainer
+    @ObservedObject private var rootState: RootViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
@@ -9,13 +10,31 @@ struct PersonalizationSheet: View {
     @State private var mode: ConversationMode = .chat
     @State private var selectedCharacterID = CharacterCatalog.flagship.id
     @State private var selectedSceneID = CharacterCatalog.flagship.defaultSceneID
-    @State private var allowChineseHints = true
+    @State private var selectedVoiceBundleID = VoiceCatalog.defaultBundle(
+        for: CharacterCatalog.flagship.id,
+        languageID: LanguageCatalog.english.id
+    ).id
+    @State private var conversationLanguageID = LanguageCatalog.english.id
+    @State private var explanationLanguageID = LanguageCatalog.simplifiedChinese.id
+    @State private var selectedVisualStyle: VideoCallVisualStyle = .natural
     @State private var loadedInitialState = false
     @State private var saving = false
 
+    init(container: AppContainer) {
+        self.container = container
+        _rootState = ObservedObject(wrappedValue: container.rootState)
+    }
+
     private var selectedCharacter: CharacterProfile { CharacterCatalog.profile(for: selectedCharacterID) }
+    private var selectableProfiles: [CharacterProfile] { CharacterCatalog.selectableProfiles }
     private var availableScenes: [CharacterScene] { CharacterCatalog.availableScenes(for: selectedCharacterID) }
     private var selectedScene: CharacterScene { CharacterCatalog.scene(for: selectedSceneID, characterID: selectedCharacterID) }
+    private var availableVoiceBundles: [VoiceBundle] { VoiceCatalog.bundles(for: selectedCharacterID, languageID: conversationLanguageID) }
+    private var selectedVoiceBundle: VoiceBundle {
+        VoiceCatalog.bundle(for: selectedVoiceBundleID, characterID: selectedCharacterID, languageID: conversationLanguageID)
+    }
+    private var conversationLanguage: LanguageProfile { LanguageCatalog.profile(for: conversationLanguageID) }
+    private var explanationLanguage: LanguageProfile { LanguageCatalog.profile(for: explanationLanguageID) }
 
     var body: some View {
         NavigationStack {
@@ -28,10 +47,9 @@ struct PersonalizationSheet: View {
                         previewCard
                         characterPicker
                         scenePicker
-                        profileForm
-                        modePicker
-                        hintToggle
+                        visualStylePicker
                         saveButton
+                        secondarySetupPanel
                     }
                     .padding(24)
                 }
@@ -46,13 +64,16 @@ struct PersonalizationSheet: View {
             }
             .task {
                 guard loadedInitialState == false else { return }
-                let snapshot = container.rootState.snapshot
+                let snapshot = rootState.snapshot
                 name = snapshot.learnerProfile.preferredName
                 goal = snapshot.learnerProfile.learningGoal
                 mode = snapshot.learnerProfile.preferredMode
                 selectedCharacterID = snapshot.companionSettings.selectedCharacterID
                 selectedSceneID = snapshot.companionSettings.selectedSceneID
-                allowChineseHints = snapshot.companionSettings.allowChineseHints
+                selectedVoiceBundleID = snapshot.companionSettings.selectedVoiceBundleID
+                conversationLanguageID = snapshot.companionSettings.conversationLanguageID
+                explanationLanguageID = snapshot.companionSettings.explanationLanguageID
+                selectedVisualStyle = snapshot.companionSettings.visualStyle
                 loadedInitialState = true
             }
         }
@@ -60,10 +81,10 @@ struct PersonalizationSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Quick Start")
+            Text("Start Your First Call")
                 .font(.system(size: 34, weight: .black, design: .rounded))
                 .foregroundStyle(Color(red: 0.15, green: 0.13, blue: 0.20))
-            Text("Set up the companion, scene, and learning goal you want to carry into your offline calls.")
+            Text("Pick the character and stage you want, then save. Personal details, language, and compatibility details stay available underneath when you need them.")
                 .font(.system(.headline, design: .rounded))
                 .foregroundStyle(.secondary)
         }
@@ -86,7 +107,11 @@ struct PersonalizationSheet: View {
 
                 Spacer()
 
-                VideoSetupPreview(character: selectedCharacter, scene: selectedScene)
+                VideoSetupPreview(
+                    character: selectedCharacter,
+                    scene: selectedScene,
+                    visualStyle: selectedVisualStyle
+                )
                     .frame(width: 126, height: 164)
             }
 
@@ -94,6 +119,9 @@ struct PersonalizationSheet: View {
                 SetupFact(text: selectedCharacter.speakingStyle, icon: "waveform")
                 SetupFact(text: selectedCharacter.greetingStyle, icon: "video.bubble.left")
                 SetupFact(text: selectedScene.title, icon: "sparkles.tv")
+                SetupFact(text: selectedVisualStyle.title, icon: "camera.filters")
+                SetupFact(text: "\(selectedVoiceBundle.displayName) • \(selectedVoiceBundle.accentLabel)", icon: "speaker.wave.2.fill")
+                SetupFact(text: "\(conversationLanguage.displayName) call / \(explanationLanguage.displayName) help", icon: "globe")
             }
         }
         .padding(20)
@@ -116,10 +144,14 @@ struct PersonalizationSheet: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
-                    ForEach(CharacterCatalog.profiles) { profile in
+                    ForEach(selectableProfiles) { profile in
                         Button {
                             selectedCharacterID = profile.id
                             selectedSceneID = CharacterCatalog.defaultScene(for: profile.id).id
+                            selectedVoiceBundleID = VoiceCatalog.defaultBundle(
+                                for: profile.id,
+                                languageID: conversationLanguageID
+                            ).id
                         } label: {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(profile.displayName)
@@ -200,6 +232,73 @@ struct PersonalizationSheet: View {
         .panelCard()
     }
 
+    private var visualStylePicker: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Visual Style")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+
+            HStack(spacing: 10) {
+                ForEach(VideoCallVisualStyle.allCases) { style in
+                    Button {
+                        selectedVisualStyle = style
+                    } label: {
+                        QuickStartSceneCard(
+                            title: style.title,
+                            subtitle: style.subtitle,
+                            isSelected: style == selectedVisualStyle
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Text("Pick the look you want the call stage to keep across the app.")
+                .font(.system(.caption, design: .rounded))
+                .foregroundStyle(.secondary)
+        }
+        .panelCard()
+    }
+
+    private var languageSupportPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Language & Voice")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+
+            Picker("Conversation Language", selection: $conversationLanguageID) {
+                ForEach(LanguageCatalog.all) { profile in
+                    Text(profile.displayName).tag(profile.id)
+                }
+            }
+            .onChange(of: conversationLanguageID) { _, newValue in
+                selectedVoiceBundleID = VoiceCatalog.defaultBundle(
+                    for: selectedCharacterID,
+                    languageID: newValue
+                ).id
+            }
+
+            Picker("Explanation Language", selection: $explanationLanguageID) {
+                ForEach(LanguageCatalog.all) { profile in
+                    Text(profile.displayName).tag(profile.id)
+                }
+            }
+
+            Picker("Voice / Accent", selection: $selectedVoiceBundleID) {
+                ForEach(availableVoiceBundles) { voiceBundle in
+                    Text(voiceBundle.displayName).tag(voiceBundle.id)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Reference Accent: \(selectedVoiceBundle.accentLabel)")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                Text(selectedVoiceBundle.styleDescription)
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .panelCard()
+    }
+
     private var modePicker: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Default Call Style")
@@ -232,21 +331,49 @@ struct PersonalizationSheet: View {
         .panelCard()
     }
 
-    private var hintToggle: some View {
+    private var portraitCharacterPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Language Support")
+            Text("Photo Character")
                 .font(.system(.title3, design: .rounded, weight: .bold))
 
-            Toggle(isOn: $allowChineseHints) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: CharacterCatalog.primaryPortraitAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(CharacterCatalog.primaryPortraitAvailable ? Color(red: 0.19, green: 0.56, blue: 0.30) : Color(red: 0.80, green: 0.45, blue: 0.17))
+                    .font(.system(size: 20, weight: .semibold))
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Allow concise Chinese hints")
+                    Text(CharacterCatalog.primaryPortraitAvailable ? "Bundled photo character is active" : "Bundled photo character is missing")
                         .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    Text("Keep speaking practice in English, but allow short Chinese clarification when needed.")
-                        .font(.system(.caption, design: .rounded))
-                        .foregroundStyle(.secondary)
+                    Text(
+                        CharacterCatalog.primaryPortraitAvailable
+                            ? "The app now uses the bundled portrait as the default call character across home, preview, and live call views."
+                            : "A local portrait photo is required before the release-ready character can render as the main video-call presence."
+                    )
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
                 }
             }
-            .tint(Color(red: 0.92, green: 0.42, blue: 0.27))
+        }
+    }
+
+    private var secondarySetupPanel: some View {
+        DisclosureGroup {
+            VStack(alignment: .leading, spacing: 18) {
+                profileForm
+                languageSupportPanel
+                modePicker
+                portraitCharacterPanel
+            }
+            .padding(.top, 12)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("More Options")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.20))
+                Text("Name, goal, language, default mode, and photo character status stay here so the first setup stays lightweight.")
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
         }
         .panelCard()
     }
@@ -260,7 +387,7 @@ struct PersonalizationSheet: View {
                     ProgressView()
                         .tint(.white)
                 }
-                Text(saving ? "Saving..." : "Save quick setup")
+                Text(saving ? "Saving..." : "Use This Setup")
                     .font(.system(.headline, design: .rounded, weight: .bold))
                 Spacer()
                 Image(systemName: "arrow.right.circle.fill")
@@ -286,26 +413,32 @@ struct PersonalizationSheet: View {
         let capturedMode = mode
         let capturedCharacterID = selectedCharacterID
         let capturedSceneID = selectedSceneID
-        let capturedAllowChineseHints = allowChineseHints
-
+        let capturedVoiceBundleID = selectedVoiceBundleID
+        let capturedConversationLanguageID = conversationLanguageID
+        let capturedExplanationLanguageID = explanationLanguageID
+        let capturedVisualStyle = selectedVisualStyle
         do {
-            try await container.memoryStore.updateLearnerProfile { profile in
+            try await rootState.updateLearnerProfile { profile in
                 profile.preferredName = capturedName
                 profile.learningGoal = capturedGoal
                 profile.preferredMode = capturedMode
             }
-            try await container.memoryStore.updateCompanionSettings { settings in
+            try await rootState.updateCompanionSettings { settings in
                 settings.selectedCharacterID = capturedCharacterID
                 settings.selectedSceneID = capturedSceneID
-                settings.allowChineseHints = capturedAllowChineseHints
+                settings.selectedVoiceBundleID = capturedVoiceBundleID
+                settings.conversationLanguageID = capturedConversationLanguageID
+                settings.explanationLanguageID = capturedExplanationLanguageID
+                settings.visualStyle = capturedVisualStyle
+                settings.allowChineseHints = capturedExplanationLanguageID != LanguageCatalog.english.id
+                settings.portraitModeEnabled = CharacterCatalog.primaryPortraitAvailable
                 settings.warmupCompleted = true
             }
-            container.rootState.selectedMode = capturedMode
-            await container.rootState.refresh()
-            container.rootState.showingPersonalizationPrompt = false
+            rootState.selectedMode = capturedMode
+            rootState.showingPersonalizationPrompt = false
             dismiss()
         } catch {
-            container.rootState.globalError = error.localizedDescription
+            rootState.globalError = error.localizedDescription
         }
     }
 }
@@ -316,11 +449,11 @@ private struct QuickStartSceneCard: View {
     let isSelected: Bool
 
     private var foreground: Color {
-        isSelected ? .white : Color(red: 0.22, green: 0.20, blue: 0.26)
+        isSelected ? Color(red: 0.35, green: 0.18, blue: 0.10) : Color(red: 0.22, green: 0.20, blue: 0.26)
     }
 
     private var background: Color {
-        isSelected ? Color(red: 0.92, green: 0.42, blue: 0.27) : Color(red: 0.97, green: 0.95, blue: 0.92)
+        isSelected ? Color(red: 0.99, green: 0.88, blue: 0.78) : Color(red: 0.97, green: 0.95, blue: 0.92)
     }
 
     var body: some View {
@@ -337,12 +470,20 @@ private struct QuickStartSceneCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(background)
         )
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(
+                    isSelected ? Color(red: 0.87, green: 0.41, blue: 0.24) : Color.black.opacity(0.05),
+                    lineWidth: isSelected ? 1.25 : 1
+                )
+        }
     }
 }
 
-private struct VideoSetupPreview: View {
+private struct VideoSetupPreview: View, Equatable {
     let character: CharacterProfile
     let scene: CharacterScene
+    let visualStyle: VideoCallVisualStyle
 
     var body: some View {
         ZStack {
@@ -356,6 +497,12 @@ private struct VideoSetupPreview: View {
                         endPoint: .bottom
                     )
                 )
+
+            LinearGradient(
+                colors: [Color.clear, Color.black.opacity(0.16), Color.black.opacity(0.34)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
 
             VStack {
                 HStack {
@@ -371,20 +518,28 @@ private struct VideoSetupPreview: View {
 
                 Spacer()
 
-                CharacterStageView(
-                    state: .idle,
-                    audioLevel: 0.05,
-                    emphasis: .hero,
-                    characterID: character.id,
-                    sceneID: scene.id
+                CharacterStageSurface(
+                    character: character,
+                    scene: scene,
+                    visualStyle: visualStyle,
+                    emphasis: .preview,
+                    surfaceKind: .quickStartPreview,
+                    size: CGSize(width: 96, height: 118),
+                    isAnimated: false,
+                    showsBackdrop: false,
+                    groundShadowWidth: 70,
+                    groundShadowHeight: 12,
+                    groundShadowBlur: 8
                 )
-                    .frame(width: 96, height: 118)
 
                 Spacer()
 
                 Text(character.displayName)
                     .font(.system(.caption, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.26)))
                     .padding(.bottom, 10)
             }
         }
@@ -403,6 +558,16 @@ private struct SetupFact: View {
         Label(text, systemImage: icon)
             .font(.system(.caption, design: .rounded, weight: .semibold))
             .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.30))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+            )
     }
 }
 

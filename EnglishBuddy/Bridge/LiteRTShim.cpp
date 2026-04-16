@@ -1,7 +1,5 @@
 #include "LiteRTShim.hpp"
 
-#include <TargetConditionals.h>
-
 #include <chrono>
 #include <filesystem>
 #include <sstream>
@@ -61,10 +59,6 @@ std::string BuildTextContentJson(const std::string& text) {
   return "{\"type\":\"text\",\"text\":\"" + EscapeJsonString(text) + "\"}";
 }
 
-std::string BuildTextContentArrayJson(const std::string& text) {
-  return "[" + BuildTextContentJson(text) + "]";
-}
-
 std::string BuildUserMessageJson(const std::string& text) {
   return "{\"role\":\"user\",\"content\":[" + BuildTextContentJson(text) + "]}";
 }
@@ -95,9 +89,12 @@ LiteRTShim::~LiteRTShim() {
   ResetRuntimeObjects();
 }
 
-bool LiteRTShim::Prepare(const std::string& model_path, bool prefer_gpu,
+bool LiteRTShim::Prepare(const std::string& model_path,
+                         const std::string& cache_directory_path,
+                         bool prefer_gpu,
                          std::string* error_message) {
   model_path_ = model_path;
+  cache_directory_path_ = cache_directory_path;
   prefer_gpu_ = prefer_gpu;
   cancelled_ = false;
   use_stub_runtime_ = false;
@@ -127,10 +124,11 @@ bool LiteRTShim::Prepare(const std::string& model_path, bool prefer_gpu,
     }
 
     std::error_code filesystem_error;
-    const auto cache_path = std::filesystem::path(model_path).parent_path() / "LiteRTCache";
-    std::filesystem::create_directories(cache_path, filesystem_error);
-    if (!filesystem_error) {
-      litert_lm_engine_settings_set_cache_dir(settings, cache_path.string().c_str());
+    if (!cache_directory_path_.empty()) {
+      std::filesystem::create_directories(cache_directory_path_, filesystem_error);
+      if (!filesystem_error) {
+        litert_lm_engine_settings_set_cache_dir(settings, cache_directory_path_.c_str());
+      }
     }
 
     LiteRtLmEngine* engine = litert_lm_engine_create(settings);
@@ -204,15 +202,10 @@ bool LiteRTShim::StartConversation(const std::string& system_prompt,
   };
   litert_lm_session_config_set_sampler_params(session_config, &sampler_params);
 
-  std::string combined_prompt_json;
-  const char* system_prompt_json = nullptr;
-#if !TARGET_OS_SIMULATOR
-  combined_prompt_json = BuildTextContentArrayJson(BuildCombinedSystemPrompt());
-  system_prompt_json = combined_prompt_json.c_str();
-#endif
+  const std::string system_prompt_json = BuildTextContentJson(system_prompt_);
   LiteRtLmConversationConfig* conversation_config =
       litert_lm_conversation_config_create(runtime_->engine, session_config,
-                                           system_prompt_json, nullptr,
+                                           system_prompt_json.c_str(), nullptr,
                                            nullptr, false);
   litert_lm_session_config_delete(session_config);
 
@@ -354,14 +347,6 @@ std::string LiteRTShim::BuildStubResponse(const std::string& input_text) const {
     output << "I am also remembering your recent practice themes while we talk. ";
   }
   return output.str();
-}
-
-std::string LiteRTShim::BuildCombinedSystemPrompt() const {
-  if (memory_context_.empty()) {
-    return system_prompt_;
-  }
-
-  return system_prompt_ + "\n\nRelevant learner memory:\n" + memory_context_;
 }
 
 void LiteRTShim::ResetRuntimeObjects() {

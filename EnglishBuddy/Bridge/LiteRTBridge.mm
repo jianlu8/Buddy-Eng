@@ -64,9 +64,17 @@ NSString *ExtractTextFromChunkJSON(const std::string &json_chunk) {
     _shim = nullptr;
 }
 
-- (BOOL)prepareWithModelURL:(NSURL *)modelURL backend:(LiteRTBridgeBackend)backend error:(NSError **)error {
+- (BOOL)prepareWithModelURL:(NSURL *)modelURL
+          cacheDirectoryURL:(NSURL *)cacheDirectoryURL
+                    backend:(LiteRTBridgeBackend)backend
+                      error:(NSError **)error {
     std::string message;
-    const BOOL success = _shim->Prepare(modelURL.path.UTF8String, backend == LiteRTBridgeBackendGPU, &message);
+    const BOOL success = _shim->Prepare(
+        modelURL.path.UTF8String,
+        cacheDirectoryURL.path.UTF8String,
+        backend == LiteRTBridgeBackendGPU,
+        &message
+    );
     if (!success && error != nil) {
         *error = [NSError errorWithDomain:@"LiteRTBridge" code:100 userInfo:@{NSLocalizedDescriptionKey: @(message.c_str())}];
     }

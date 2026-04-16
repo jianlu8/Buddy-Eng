@@ -1,85 +1,145 @@
 import SwiftUI
 
 struct HomeView: View {
-    @EnvironmentObject private var container: AppContainer
+    let container: AppContainer
+    @ObservedObject private var rootState: RootViewModel
+    @State private var didAttemptDebugAutoStart = false
+    @State private var showingCustomization = false
 
-    private var snapshot: MemorySnapshot { container.rootState.snapshot }
+    init(container: AppContainer) {
+        self.container = container
+        _rootState = ObservedObject(wrappedValue: container.rootState)
+    }
+
+    private var snapshot: MemorySnapshot { rootState.snapshot }
     private var settings: CompanionSettings { snapshot.companionSettings }
     private var selectedCharacter: CharacterProfile { CharacterCatalog.profile(for: settings.selectedCharacterID) }
     private var selectedScene: CharacterScene {
         CharacterCatalog.scene(for: settings.selectedSceneID, characterID: selectedCharacter.id)
     }
+    private var selectedVoiceBundle: VoiceBundle {
+        VoiceCatalog.bundle(
+            for: settings.selectedVoiceBundleID,
+            characterID: selectedCharacter.id,
+            languageID: settings.conversationLanguageID
+        )
+    }
+    private var conversationLanguage: LanguageProfile {
+        LanguageCatalog.profile(for: settings.conversationLanguageID)
+    }
+    private var explanationLanguage: LanguageProfile {
+        LanguageCatalog.profile(for: settings.explanationLanguageID)
+    }
+    private var recentThreadState: ConversationThreadState? {
+        recentSession.flatMap { session in
+            snapshot.threadStates.first(where: { $0.id == session.continuationThreadID })
+        }
+    }
     private var recommendedScenario: ScenarioPreset {
-        ScenarioCatalog.recommended(for: snapshot.learnerProfile, mode: container.rootState.selectedMode)
+        if let recentSession, recentSession.mode == rootState.selectedMode {
+            return ScenarioCatalog.preset(for: recentSession.scenarioID, mode: rootState.selectedMode)
+        }
+        return ScenarioCatalog.recommended(for: snapshot.learnerProfile, mode: rootState.selectedMode)
     }
     private var learningPlan: LearningFocusPlan {
-        LearningFocusPlan.suggested(
+        if let recentSession, recentSession.mode == rootState.selectedMode {
+            return LearningFocusPlan.continued(
+                learner: snapshot.learnerProfile,
+                scenario: recommendedScenario,
+                mode: rootState.selectedMode,
+                vocabulary: snapshot.vocabulary,
+                previousSession: recentSession
+            )
+        }
+        return LearningFocusPlan.suggested(
             learner: snapshot.learnerProfile,
             scenario: recommendedScenario,
-            mode: container.rootState.selectedMode,
+            mode: rootState.selectedMode,
             vocabulary: snapshot.vocabulary
         )
+    }
+    private var scenarioPresets: [ScenarioPreset] {
+        ScenarioCatalog.presets(for: rootState.selectedMode)
+    }
+    private var recentSession: ConversationSession? {
+        snapshot.sessions
+            .sorted { ($0.endedAt ?? $0.startedAt) > ($1.endedAt ?? $1.startedAt) }
+            .first
     }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
+            LazyVStack(alignment: .leading, spacing: 22) {
                 header
 
                 CharacterStageCard(
-                    snapshot: snapshot,
                     character: selectedCharacter,
                     scene: selectedScene,
                     scenario: recommendedScenario,
                     learningPlan: learningPlan,
-                    readiness: container.modelManager.activeModelReadiness,
-                    modelName: container.modelManager.selectedModel.displayName,
+                    visualStyle: settings.visualStyle,
                     selectedMode: Binding(
-                        get: { container.rootState.selectedMode },
-                        set: { container.rootState.selectedMode = $0 }
+                        get: { rootState.selectedMode },
+                        set: { rootState.selectedMode = $0 }
                     ),
-                    startupState: container.rootState.callStartupState,
+                    startupState: rootState.callStartupState,
                     startAction: {
-                        Task { await container.rootState.startCall(container.rootState.selectedMode) }
+                        Task { await rootState.startCall(rootState.selectedMode) }
                     },
                     dismissRecovery: {
-                        container.rootState.clearCallRecoveryState()
+                        rootState.clearCallRecoveryState()
                     }
                 )
 
-                CharacterRail(
-                    selectedCharacterID: selectedCharacter.id,
-                    profiles: CharacterCatalog.profiles
-                ) { profile in
-                    Task { await updateCharacterSelection(profile.id) }
+                if let recentSession {
+                    ContinueConversationCard(session: recentSession, threadState: recentThreadState) {
+                        Task { await continueSession(recentSession) }
+                    }
                 }
 
-                SceneAndMissionPanel(
+                ScenarioLaunchRail(
+                    mode: rootState.selectedMode,
+                    presets: scenarioPresets,
+                    recommendedScenarioID: recommendedScenario.id,
+                    isBusy: {
+                        if case .starting = rootState.callStartupState {
+                            return true
+                        }
+                        return false
+                    }(),
+                    startAction: { scenario in
+                        Task { await startScenario(scenario) }
+                    }
+                )
+
+                CustomizationDock(
+                    isExpanded: $showingCustomization,
+                    selectedCharacterID: selectedCharacter.id,
+                    profiles: CharacterCatalog.selectableProfiles,
                     scene: selectedScene,
                     availableScenes: CharacterCatalog.availableScenes(for: selectedCharacter.id),
                     selectedSceneID: selectedScene.id,
+                    visualStyle: settings.visualStyle,
+                    voiceBundle: selectedVoiceBundle,
+                    conversationLanguage: conversationLanguage,
+                    explanationLanguage: explanationLanguage,
                     scenario: recommendedScenario,
                     learningPlan: learningPlan,
+                    onSelectCharacter: { profile in
+                        Task { await updateCharacterSelection(profile.id) }
+                    },
                     onSelectScene: { scene in
                         Task { await updateSceneSelection(scene.id) }
+                    },
+                    onSelectVisualStyle: { style in
+                        Task { await updateVisualStyleSelection(style) }
                     }
                 )
 
                 if needsPersonalization {
                     PersonalizationPromptCard {
-                        container.rootState.showingPersonalizationPrompt = true
+                        rootState.showingPersonalizationPrompt = true
                     }
-                }
-
-                OfflineConfidenceCard(
-                    descriptor: container.modelManager.selectedModel,
-                    record: container.modelManager.selectedRecord,
-                    settings: settings,
-                    learner: snapshot.learnerProfile
-                )
-
-                if snapshot.sessions.isEmpty == false {
-                    SessionHighlightsCard(snapshot: snapshot)
                 }
             }
             .padding(.horizontal, 20)
@@ -89,7 +149,7 @@ struct HomeView: View {
         .background(Color.clear)
         .navigationBarHidden(true)
         .task {
-            await container.rootState.refresh()
+            await maybeAutoStartDebugCall()
         }
     }
 
@@ -112,11 +172,11 @@ struct HomeView: View {
             Spacer(minLength: 12)
 
             HeaderIconButton(systemImage: "book.pages") {
-                container.rootState.showingHistory = true
+                rootState.showingHistory = true
             }
 
             HeaderIconButton(systemImage: "slider.horizontal.3") {
-                container.rootState.showingSettings = true
+                rootState.showingSettings = true
             }
         }
     }
@@ -124,26 +184,157 @@ struct HomeView: View {
     private func updateCharacterSelection(_ characterID: String) async {
         do {
             let defaultScene = CharacterCatalog.defaultScene(for: characterID)
-            try await container.memoryStore.updateCompanionSettings { settings in
+            try await rootState.updateCompanionSettings { settings in
                 settings.selectedCharacterID = characterID
                 settings.selectedSceneID = defaultScene.id
+                settings.selectedVoiceBundleID = VoiceCatalog.defaultBundle(
+                    for: characterID,
+                    languageID: settings.conversationLanguageID
+                ).id
                 settings.warmupCompleted = true
             }
-            await container.rootState.refresh()
         } catch {
-            container.rootState.globalError = error.localizedDescription
+            rootState.globalError = error.localizedDescription
         }
     }
 
     private func updateSceneSelection(_ sceneID: String) async {
         do {
-            try await container.memoryStore.updateCompanionSettings { settings in
+            try await rootState.updateCompanionSettings { settings in
                 settings.selectedSceneID = sceneID
                 settings.warmupCompleted = true
             }
-            await container.rootState.refresh()
         } catch {
-            container.rootState.globalError = error.localizedDescription
+            rootState.globalError = error.localizedDescription
+        }
+    }
+
+    private func updateVisualStyleSelection(_ visualStyle: VideoCallVisualStyle) async {
+        do {
+            try await rootState.updateCompanionSettings { settings in
+                settings.visualStyle = visualStyle
+                settings.warmupCompleted = true
+            }
+        } catch {
+            rootState.globalError = error.localizedDescription
+        }
+    }
+
+    private func continueSession(_ session: ConversationSession) async {
+        do {
+            try await rootState.updateCompanionSettings { settings in
+                settings.selectedCharacterID = CharacterCatalog.profile(for: session.characterID).id
+                settings.selectedSceneID = CharacterCatalog.scene(for: session.sceneID, characterID: session.characterID).id
+                settings.conversationLanguageID = session.languageProfileID
+                settings.selectedVoiceBundleID = session.voiceBundleID
+                settings.warmupCompleted = true
+            }
+            await rootState.startCall(
+                session.mode,
+                preferredScenarioID: session.scenarioID,
+                continuationAnchor: session
+            )
+        } catch {
+            rootState.globalError = error.localizedDescription
+        }
+    }
+
+    private func startScenario(_ scenario: ScenarioPreset) async {
+        await rootState.startCall(
+            rootState.selectedMode,
+            preferredScenarioID: scenario.id
+        )
+    }
+
+    private func maybeAutoStartDebugCall() async {
+#if DEBUG
+        guard didAttemptDebugAutoStart == false else { return }
+        didAttemptDebugAutoStart = true
+
+        let rawValue = ProcessInfo.processInfo.environment["ENGLISHBUDDY_DEBUG_AUTO_START_CALL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        guard let rawValue, rawValue.isEmpty == false else { return }
+        let mode: ConversationMode = rawValue == "tutor" ? .tutor : .chat
+
+        guard rootState.showingCall == false else { return }
+        guard case .idle = rootState.callStartupState else { return }
+
+        await rootState.startCall(mode)
+#endif
+    }
+}
+
+private struct CustomizationDock: View {
+    @Binding var isExpanded: Bool
+    let selectedCharacterID: String
+    let profiles: [CharacterProfile]
+    let scene: CharacterScene
+    let availableScenes: [CharacterScene]
+    let selectedSceneID: String
+    let visualStyle: VideoCallVisualStyle
+    let voiceBundle: VoiceBundle
+    let conversationLanguage: LanguageProfile
+    let explanationLanguage: LanguageProfile
+    let scenario: ScenarioPreset
+    let learningPlan: LearningFocusPlan
+    let onSelectCharacter: (CharacterProfile) -> Void
+    let onSelectScene: (CharacterScene) -> Void
+    let onSelectVisualStyle: (VideoCallVisualStyle) -> Void
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 18) {
+                if profiles.count > 1 {
+                    CharacterRail(
+                        selectedCharacterID: selectedCharacterID,
+                        profiles: profiles,
+                        onSelect: onSelectCharacter
+                    )
+                }
+
+                SceneAndMissionPanel(
+                    scene: scene,
+                    availableScenes: availableScenes,
+                    selectedSceneID: selectedSceneID,
+                    visualStyle: visualStyle,
+                    voiceBundle: voiceBundle,
+                    conversationLanguage: conversationLanguage,
+                    explanationLanguage: explanationLanguage,
+                    scenario: scenario,
+                    learningPlan: learningPlan,
+                    onSelectScene: onSelectScene,
+                    onSelectVisualStyle: onSelectVisualStyle
+                )
+            }
+            .padding(.top, 14)
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Customize This Call")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                    Text("Character, scene, style, and language stay available here without taking over the first screen.")
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: isExpanded ? "chevron.up.circle.fill" : "slider.horizontal.3")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.92, green: 0.42, blue: 0.27))
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.white.opacity(0.94))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
         }
     }
 }
@@ -169,13 +360,11 @@ private struct HeaderIconButton: View {
 }
 
 private struct CharacterStageCard: View {
-    let snapshot: MemorySnapshot
     let character: CharacterProfile
     let scene: CharacterScene
     let scenario: ScenarioPreset
     let learningPlan: LearningFocusPlan
-    let readiness: ActiveModelReadiness
-    let modelName: String
+    let visualStyle: VideoCallVisualStyle
     @Binding var selectedMode: ConversationMode
     let startupState: CallStartupState
     let startAction: () -> Void
@@ -183,63 +372,26 @@ private struct CharacterStageCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 8) {
-                        StatusChip(text: scene.title, tint: Color.white.opacity(0.16), foreground: .white)
-                        StatusChip(text: readinessLabel, tint: readinessTint, foreground: readinessForeground)
-                    }
-
-                    Text(character.displayName)
-                        .font(.system(size: 40, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-
-                    Text(character.heroHeadline)
-                        .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.94))
-
-                    Text(character.roleDescription)
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.78))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                VideoCompanionPreview(character: character, scene: scene)
-                    .frame(width: 150, height: 210)
-            }
+            heroHeader
 
             modePicker
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(snapshot.learnerProfile.cefrEstimate.rawValue, systemImage: "chart.bar.xaxis")
-                    Spacer()
-                    Label(modeSummary, systemImage: selectedMode == .chat ? "phone.fill" : "graduationcap.fill")
-                }
-                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.92))
-
                 StageCalloutCard(
                     title: scenario.title,
                     subtitle: scenario.summary,
-                    accent: .white.opacity(0.16)
+                    accent: Color.black.opacity(0.22)
                 )
 
                 StageCalloutCard(
                     title: learningPlan.title,
                     subtitle: learningPlan.mission,
                     footnote: learningPlan.successSignal,
-                    accent: Color.black.opacity(0.14)
+                    accent: Color.black.opacity(0.28)
                 )
             }
 
             startButton
-
-            Text(readinessFootnote)
-                .font(.system(.footnote, design: .rounded))
-                .foregroundStyle(.white.opacity(0.82))
 
             if case let .recoverableFailure(_, message, suggestedAction) = startupState {
                 RecoveryCard(message: message, suggestedAction: suggestedAction, dismissAction: dismissRecovery)
@@ -285,38 +437,6 @@ private struct CharacterStageCard: View {
         }
     }
 
-    private var modeSummary: String {
-        selectedMode == .chat ? "Companion call" : "Focused coaching"
-    }
-
-    private var readinessLabel: String {
-        if case .ready = readiness {
-            return "Ready Offline"
-        }
-        return "Attention Needed"
-    }
-
-    private var readinessTint: Color {
-        if case .ready = readiness {
-            return Color.green.opacity(0.2)
-        }
-        return Color.red.opacity(0.18)
-    }
-
-    private var readinessForeground: Color {
-        if case .ready = readiness {
-            return Color(red: 0.79, green: 1.0, blue: 0.84)
-        }
-        return Color(red: 1.0, green: 0.88, blue: 0.84)
-    }
-
-    private var readinessFootnote: String {
-        if case let .unavailable(message) = readiness {
-            return message
-        }
-        return "\(modelName) is loaded locally. Your character, scene, and mission stay available even without a network connection."
-    }
-
     private var modePicker: some View {
         HStack(spacing: 10) {
             ForEach(ConversationMode.allCases) { mode in
@@ -335,14 +455,15 @@ private struct CharacterStageCard: View {
                     .padding(14)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(selectedMode == mode ? Color.white.opacity(0.18) : Color.white.opacity(0.08))
+                            .fill(selectedMode == mode ? Color.black.opacity(0.30) : Color.black.opacity(0.18))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color.white.opacity(selectedMode == mode ? 0.28 : 0.12), lineWidth: 1)
+                                    .stroke(Color.white.opacity(selectedMode == mode ? 0.18 : 0.10), lineWidth: 1)
                             )
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("home.mode.\(mode.id)")
             }
         }
     }
@@ -371,16 +492,17 @@ private struct CharacterStageCard: View {
             .padding(18)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color.white.opacity(0.16))
+                    .fill(Color.black.opacity(0.28))
                     .overlay(
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     )
             )
         }
         .buttonStyle(.plain)
         .disabled(isStarting)
         .opacity(isStarting ? 0.78 : 1)
+        .accessibilityIdentifier("home.startCall")
     }
 
     private var buttonSubtitle: String {
@@ -398,6 +520,64 @@ private struct CharacterStageCard: View {
         }
         return false
     }
+
+    private var heroHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                heroCopy
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                heroPreview(width: 132, height: 188)
+                    .fixedSize()
+            }
+
+            VStack(alignment: .leading, spacing: 18) {
+                heroCopy
+
+                HStack {
+                    Spacer(minLength: 0)
+                    heroPreview(width: 146, height: 204)
+                }
+            }
+        }
+    }
+
+    private var heroCopy: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    StatusChip(text: scene.title, tint: Color.black.opacity(0.24), foreground: .white)
+                    StatusChip(text: visualStyle.title, tint: Color.black.opacity(0.20), foreground: .white.opacity(0.94))
+                }
+            }
+
+            Text(character.displayName)
+                .font(.system(size: 40, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.82)
+
+            Text(character.heroHeadline)
+                .font(.system(.title3, design: .rounded, weight: .bold))
+                .foregroundStyle(.white.opacity(0.94))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(character.roleDescription)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.white.opacity(0.78))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func heroPreview(width: CGFloat, height: CGFloat) -> some View {
+        VideoCompanionPreview(
+            character: character,
+            scene: scene,
+            visualStyle: visualStyle
+        )
+        .frame(width: width, height: height)
+    }
 }
 
 private struct StatusChip: View {
@@ -411,7 +591,14 @@ private struct StatusChip: View {
             .foregroundStyle(foreground)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Capsule().fill(tint))
+            .background(
+                Capsule()
+                    .fill(tint)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+            )
     }
 }
 
@@ -444,14 +631,21 @@ private struct StageCalloutCard: View {
     }
 }
 
-private struct VideoCompanionPreview: View {
+private struct VideoCompanionPreview: View, Equatable {
     let character: CharacterProfile
     let scene: CharacterScene
+    let visualStyle: VideoCallVisualStyle
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .fill(sceneGradient)
+
+            LinearGradient(
+                colors: [Color.clear, Color.black.opacity(0.18), Color.black.opacity(0.38)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
 
             VStack(spacing: 10) {
                 HStack {
@@ -470,21 +664,17 @@ private struct VideoCompanionPreview: View {
 
                 Spacer()
 
-                CharacterStageView(
-                    state: .idle,
-                    audioLevel: 0.06,
-                    emphasis: .hero,
-                    characterID: character.id,
-                    sceneID: scene.id
+                CharacterStageSurface(
+                    character: character,
+                    scene: scene,
+                    visualStyle: visualStyle,
+                    emphasis: .preview,
+                    surfaceKind: .quickStartPreview,
+                    size: CGSize(width: 116, height: 150),
+                    isAnimated: false,
+                    showsBackdrop: false,
+                    groundShadowWidth: 86
                 )
-                    .frame(width: 116, height: 150)
-                    .overlay(alignment: .bottom) {
-                        Capsule()
-                            .fill(Color.black.opacity(0.18))
-                            .frame(width: 86, height: 14)
-                            .blur(radius: 10)
-                            .offset(y: 10)
-                    }
 
                 Spacer()
 
@@ -499,6 +689,11 @@ private struct VideoCompanionPreview: View {
                     Spacer()
                 }
                 .foregroundStyle(.white.opacity(0.92))
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.22))
+                )
                 .padding(.horizontal, 12)
                 .padding(.bottom, 12)
             }
@@ -588,9 +783,14 @@ private struct SceneAndMissionPanel: View {
     let scene: CharacterScene
     let availableScenes: [CharacterScene]
     let selectedSceneID: String
+    let visualStyle: VideoCallVisualStyle
+    let voiceBundle: VoiceBundle
+    let conversationLanguage: LanguageProfile
+    let explanationLanguage: LanguageProfile
     let scenario: ScenarioPreset
     let learningPlan: LearningFocusPlan
     let onSelectScene: (CharacterScene) -> Void
+    let onSelectVisualStyle: (VideoCallVisualStyle) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -620,6 +820,43 @@ private struct SceneAndMissionPanel: View {
                 }
 
                 Text(scene.ambienceDescription)
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Visual Style")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.25, green: 0.22, blue: 0.28))
+
+                HStack(spacing: 10) {
+                    ForEach(VideoCallVisualStyle.allCases) { style in
+                        Button {
+                            onSelectVisualStyle(style)
+                        } label: {
+                            SceneSelectionChip(title: style.title, isSelected: style == visualStyle)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                Text(visualStyle.subtitle)
+                    .font(.system(.caption, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Language Stack")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.25, green: 0.22, blue: 0.28))
+
+                HStack(spacing: 10) {
+                    SceneSelectionChip(title: conversationLanguage.displayName, isSelected: true)
+                    SceneSelectionChip(title: explanationLanguage.displayName, isSelected: true)
+                    SceneSelectionChip(title: voiceBundle.displayName, isSelected: true)
+                }
+
+                Text("Conversation stays in \(conversationLanguage.displayName). Clarifications can switch to \(explanationLanguage.displayName).")
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
@@ -673,11 +910,11 @@ private struct SceneSelectionChip: View {
     let isSelected: Bool
 
     private var foreground: Color {
-        isSelected ? .white : Color(red: 0.25, green: 0.22, blue: 0.28)
+        isSelected ? Color(red: 0.35, green: 0.18, blue: 0.10) : Color(red: 0.25, green: 0.22, blue: 0.28)
     }
 
     private var background: Color {
-        isSelected ? Color(red: 0.92, green: 0.42, blue: 0.27) : Color(red: 0.95, green: 0.92, blue: 0.88)
+        isSelected ? Color(red: 0.99, green: 0.88, blue: 0.78) : Color(red: 0.95, green: 0.92, blue: 0.88)
     }
 
     var body: some View {
@@ -687,6 +924,210 @@ private struct SceneSelectionChip: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(Capsule().fill(background))
+            .overlay {
+                Capsule()
+                    .stroke(
+                        isSelected ? Color(red: 0.87, green: 0.41, blue: 0.24) : Color.black.opacity(0.05),
+                        lineWidth: isSelected ? 1.25 : 1
+                    )
+            }
+    }
+}
+
+private struct ContinueConversationCard: View {
+    let session: ConversationSession
+    let threadState: ConversationThreadState?
+    let continueAction: () -> Void
+
+    private var character: CharacterProfile {
+        CharacterCatalog.profile(for: session.characterID)
+    }
+
+    private var scenarioTitle: String {
+        ScenarioCatalog.preset(for: session.scenarioID, mode: session.mode).title
+    }
+
+    private var summaryText: String {
+        if let continuationCue = threadState?.continuationCue, continuationCue.isEmpty == false {
+            return continuationCue
+        }
+        let summary = session.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if summary.isEmpty == false {
+            return summary
+        }
+        return session.turns.last?.text ?? "Pick the thread back up from your most recent exchange."
+    }
+
+    private var missionText: String? {
+        if let nextMission = threadState?.nextMission, nextMission.isEmpty == false {
+            return nextMission
+        }
+        if let mission = session.learningPlanSnapshot?.mission, mission.isEmpty == false {
+            return mission
+        }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Continue Last Call", systemImage: "arrow.clockwise.circle.fill")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                Spacer()
+                Text(session.mode.title)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.51, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
+            }
+
+            Text("\(character.displayName) • \(scenarioTitle)")
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.20))
+
+            Text(summaryText)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+
+            if let missionText {
+                Text(missionText)
+                    .font(.system(.caption, design: .rounded, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.30, green: 0.28, blue: 0.34))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.96, green: 0.94, blue: 0.91))
+                    )
+            }
+
+            Button(action: continueAction) {
+                HStack(spacing: 10) {
+                    Image(systemName: "video.badge.waveform")
+                    Text("Resume This Thread")
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                    Spacer()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color(red: 0.92, green: 0.42, blue: 0.27))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.white.opacity(0.94))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        }
+    }
+}
+
+private struct ScenarioLaunchRail: View {
+    let mode: ConversationMode
+    let presets: [ScenarioPreset]
+    let recommendedScenarioID: String
+    let isBusy: Bool
+    let startAction: (ScenarioPreset) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(mode == .chat ? "Open A Theme" : "Guided Activities")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                Spacer()
+                Text(mode.title)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.51, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(presets) { scenario in
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                if scenario.id == recommendedScenarioID {
+                                    Text("Recommended")
+                                        .font(.system(.caption2, design: .rounded, weight: .black))
+                                        .foregroundStyle(Color(red: 0.17, green: 0.39, blue: 0.33))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 5)
+                                        .background(Capsule().fill(Color(red: 0.88, green: 0.96, blue: 0.92)))
+                                } else {
+                                    Text(mode == .chat ? "Theme" : "Activity")
+                                        .font(.system(.caption2, design: .rounded, weight: .black))
+                                        .foregroundStyle(Color(red: 0.46, green: 0.42, blue: 0.38))
+                                }
+                                Spacer()
+                                Text(scenario.suggestedReplyLength)
+                                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Text(scenario.title)
+                                .font(.system(.headline, design: .rounded, weight: .bold))
+                                .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.20))
+
+                            Text(scenario.summary)
+                                .font(.system(.subheadline, design: .rounded))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+
+                            Button {
+                                startAction(scenario)
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: mode == .chat ? "video.fill" : "figure.mind.and.body")
+                                    Text(mode == .chat ? "Start This Theme" : "Start This Activity")
+                                        .font(.system(.subheadline, design: .rounded, weight: .bold))
+                                }
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .fill(Color(red: 0.92, green: 0.42, blue: 0.27))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isBusy)
+                            .opacity(isBusy ? 0.6 : 1)
+                        }
+                        .frame(width: 248, alignment: .leading)
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .fill(Color.white.opacity(0.94))
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .stroke(scenario.id == recommendedScenarioID ? Color(red: 0.92, green: 0.42, blue: 0.27).opacity(0.38) : Color.black.opacity(0.05), lineWidth: scenario.id == recommendedScenarioID ? 1.5 : 1)
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+        }
     }
 }
 
@@ -740,7 +1181,11 @@ private struct RecoveryCard: View {
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.16))
+                .fill(Color.black.opacity(0.42))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
     }
 }
@@ -750,6 +1195,9 @@ private struct OfflineConfidenceCard: View {
     let record: ModelInstallationRecord
     let settings: CompanionSettings
     let learner: LearnerProfile
+    let voiceBundle: VoiceBundle
+    let conversationLanguage: LanguageProfile
+    let explanationLanguage: LanguageProfile
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -767,7 +1215,9 @@ private struct OfflineConfidenceCard: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
-                FactPill(title: settings.allowChineseHints ? "Chinese hints on" : "English only", icon: "character.bubble")
+                FactPill(title: "\(conversationLanguage.displayName) calls", icon: "globe")
+                FactPill(title: "\(explanationLanguage.displayName) help", icon: "character.bubble")
+                FactPill(title: voiceBundle.displayName, icon: "speaker.wave.2.fill")
                 FactPill(title: "Speech rate \(String(format: "%.2f", settings.speechRate))", icon: "speedometer")
                 FactPill(title: learner.preferredName.isEmpty ? "Anonymous profile" : learner.preferredName, icon: "person.fill")
             }

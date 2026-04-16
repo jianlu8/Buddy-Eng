@@ -10,6 +10,7 @@ typedef NS_ENUM(NSInteger, LiteRTBridgeBackend) {
 @interface LiteRTBridge : NSObject
 
 - (BOOL)prepareWithModelURL:(NSURL *)modelURL
+          cacheDirectoryURL:(NSURL *)cacheDirectoryURL
                     backend:(LiteRTBridgeBackend)backend
                       error:(NSError * _Nullable * _Nullable)error;
 
@@ -27,4 +28,3 @@ typedef NS_ENUM(NSInteger, LiteRTBridgeBackend) {
 @end
 
 NS_ASSUME_NONNULL_END
-

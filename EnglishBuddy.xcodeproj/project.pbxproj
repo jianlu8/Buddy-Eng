@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0038A421B5D100AB4DD259E3 /* ModelStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0FE56AEF01068F2BD58547 /* ModelStateStore.swift */; };
+		00A9033FF77DDD41FC4A3A4D /* UserDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B376CFA9719E21DDA47126A8 /* UserDataStore.swift */; };
+		0164A85F46C7EF04DC5BEB13 /* UserPortrait.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 6D933114521DCAFBE54A80F8 /* UserPortrait.jpg */; };
+		0B5C3ACC2FD4AB6825C7BE92 /* BundledASRRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 869725314E14477336378E5F /* BundledASRRuntime.swift */; };
+		0D934B090B11B99FA06A18FA /* SpeechAssetRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2047F31FF0D4FCE146D5AD87 /* SpeechAssetRegistry.swift */; };
+		0FEE06447431A80E991608AE /* DevicePerformanceProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA29186FF83710B52100930 /* DevicePerformanceProfile.swift */; };
 		10801833721E8E76B7B30AED /* CallStartupCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF98F7E8949E00123DC577FC /* CallStartupCoordinatorTests.swift */; };
 		10C9B3E40FF403AB78733151 /* FeedbackGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE8647B09CFA5E989174683 /* FeedbackGenerator.swift */; };
 		1151D2EC1F320D619FA61DF3 /* LiteRTBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = EF8674E7ED81F565A9EFFF07 /* LiteRTBridge.mm */; };
@@ -19,22 +25,37 @@
 		272954A2B0969F17DCD09909 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C14855F5338F51762F9FDFDF /* SettingsView.swift */; };
 		291643E476C1373EC0AF8195 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA04F557A46C620C0C2E11F3 /* RootView.swift */; };
 		2B9BF3E19B5AC1C68DE85500 /* LiveSpeechPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6122E1BBB4EE162320B5FD0 /* LiveSpeechPipeline.swift */; };
+		3091965E721A5A41BAC90669 /* AppFilesystemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D839FBC6B57EDD2D01E7C4 /* AppFilesystemTests.swift */; };
 		34500F668EE0C75094879B2E /* ModelDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A98972352FD646AAB0BD2391 /* ModelDownloadManager.swift */; };
 		34CC8D7C58C2E025B55E188C /* InferenceStreamCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321BEB9E91C6E2362FF2073C /* InferenceStreamCoordinator.swift */; };
 		356901A1707EF07068691D65 /* CallStartupCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C8D8A5D08B3EBCF7D0722A /* CallStartupCoordinator.swift */; };
+		3BA250AA6F4489842D932FA8 /* PortraitTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B747298E2D1E6AECD8EE1305 /* PortraitTypes.swift */; };
+		3CE65E49C2E59FDF2D7FFE66 /* SpeechChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E3EA9606BDCB1F0FF174B4 /* SpeechChunker.swift */; };
 		41836890FD5DB92BAC430560 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AC6A29F66B4542C0EFE0899 /* HistoryView.swift */; };
+		43CB05AF1B194A3BEDD2D576 /* ModelStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0FE56AEF01068F2BD58547 /* ModelStateStore.swift */; };
 		47D9CB9D10D2B648D18F5D3E /* Speech.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C2A0424CBBC8C83544ABC4B0 /* Speech.framework */; };
+		47ED2BDBDEE55FC2956C11D8 /* SpeechFallbackTTSRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B4D12A9D0A1BA20F9D83040 /* SpeechFallbackTTSRuntime.swift */; };
 		487B15AC89AD6ED0252B5BCA /* FileMemoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 545BA8E61B5BA18FB525529C /* FileMemoryStoreTests.swift */; };
 		49F009CE345E95D692597012 /* EnglishBuddyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89BB7B0C514B5948FB495D09 /* EnglishBuddyApp.swift */; };
 		53E108B67EF649ABE70F25E6 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50A3599EA18F1CE9E4FE40F /* HomeView.swift */; };
+		5598AAFD327AD9568B763F7B /* AssetStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27974B702203C80AC90C333 /* AssetStateStore.swift */; };
 		5AAE310C32E81518608123E7 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2342CFDEE527F2D8956C33D6 /* Models.swift */; };
+		5D65CF9936813F093B9381FB /* DuplexAudioRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAB6E98BA701D17BA3EF2819 /* DuplexAudioRuntime.swift */; };
+		61CFFAF240407C8012EB29E8 /* CharacterPresentationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E4825AE11292E21D89A9CD3 /* CharacterPresentationStore.swift */; };
+		62D71D13AAF117680ABE5EDA /* CharacterSpeechDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C76C0AFEFCF02A822212174A /* CharacterSpeechDriver.swift */; };
 		67FECCD5077460261757A51B /* GemmaModelConstraintProvider.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7A6480677BACC92A92E416A5 /* GemmaModelConstraintProvider.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6CA9089CE496986B4AEB9ECA /* ConversationOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9001CE969F3AA5DA51EDE814 /* ConversationOrchestrator.swift */; };
 		6D3C2B15FC63485FE77156C7 /* EnglishBuddyCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54591E80EFCFDABEEBB47C33 /* EnglishBuddyCore.framework */; };
+		6F5EBEE20B552F99929A52C1 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1EDA99B33001BA9F6589C004 /* sherpa-onnx.xcframework */; };
 		790026575DA56B5023C33D2C /* PromptComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3939E9D004CA0F3AB2F5C7D5 /* PromptComposer.swift */; };
+		7A64B6FE934610632A0C83D4 /* BundledSpeechAssetRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEC877C745E4EA615CD6B45E /* BundledSpeechAssetRegistryTests.swift */; };
+		7A84372F14931BC3AEA34C2E /* UserDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B376CFA9719E21DDA47126A8 /* UserDataStore.swift */; };
+		7B71195B0EC0C04AB35A1675 /* PortraitTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = B747298E2D1E6AECD8EE1305 /* PortraitTypes.swift */; };
 		7DCC668E606F6D07EB63E155 /* AppFilesystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1264357CE76FF1AC252AC0D2 /* AppFilesystem.swift */; };
+		821537660E31162D94906FF1 /* SpeechAssetRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2047F31FF0D4FCE146D5AD87 /* SpeechAssetRegistry.swift */; };
 		8233F500C045B7D1B0A20B9C /* RootViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 262758BF0949821EF8BE85EF /* RootViewModel.swift */; };
 		835252F20EE8CA5610B6FEB5 /* AppFilesystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1264357CE76FF1AC252AC0D2 /* AppFilesystem.swift */; };
+		846C0DABACC168BEFA4EECDF /* SpeechRuntimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473A2C706E77FC9F4F15D14C /* SpeechRuntimeModels.swift */; };
 		84D2D3876027C0BF618A3C13 /* FeedbackGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CE8647B09CFA5E989174683 /* FeedbackGenerator.swift */; };
 		892F84660DBF4D78992726EA /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F3262F7CF8A8A6983DFA97B /* AppContainer.swift */; };
 		89D61ED80F4D06285577691D /* CallStartupCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C8D8A5D08B3EBCF7D0722A /* CallStartupCoordinator.swift */; };
@@ -43,23 +64,44 @@
 		8BB3A238F549C429D3CD0313 /* ConversationOrchestrator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9001CE969F3AA5DA51EDE814 /* ConversationOrchestrator.swift */; };
 		8BC599600DAE5B3F1A433BCC /* LiteRTShim.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 71EF848BA36997E1988EBF73 /* LiteRTShim.cpp */; };
 		8D9128A1C71191D6593E13C1 /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 959F8C219CC0AA979BF7FA24 /* FeedbackView.swift */; };
+		8EF61B93E6810EE1BD0503CA /* SherpaOnnxBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = B581D29AE8E0379438337746 /* SherpaOnnxBridge.mm */; };
 		8F32A35E60423991CDCA1341 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09CAFE39437202EF234D042A /* Protocols.swift */; };
 		8F6A0C638FF98D0AEA5D5D2A /* QuickStartSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8857F8633D805FBFC46EA24F /* QuickStartSheet.swift */; };
+		93B845B167BC33444AB1948E /* DevicePerformanceProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA29186FF83710B52100930 /* DevicePerformanceProfile.swift */; };
+		972A5D5F7E1B6A2D35E4C061 /* PerformanceGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AC56E5B675697DC1E11E4E /* PerformanceGovernor.swift */; };
 		9A30BA60F34E5144EAACB717 /* EnglishBuddyCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 54591E80EFCFDABEEBB47C33 /* EnglishBuddyCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9B67033BFE4A8F222246D2D3 /* LiteRTInferenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7021F2F0CB67028F6DDBB2CB /* LiteRTInferenceEngine.swift */; };
 		9B6C58D10FEC17F210263C44 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2342CFDEE527F2D8956C33D6 /* Models.swift */; };
+		9CD734A9DE8DA822064544F7 /* AssetStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27974B702203C80AC90C333 /* AssetStateStore.swift */; };
 		9F13494144274FB8309C4B59 /* AvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB16A1738809D58892EBC8C /* AvatarView.swift */; };
+		9F4C6E12C0247239BE084CB5 /* StartupTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3345F9692DB1279F09C47ACB /* StartupTrace.swift */; };
+		A3539598503A08A858854C20 /* StartupTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3345F9692DB1279F09C47ACB /* StartupTrace.swift */; };
 		A71D5D4E56A9C04B53D7C444 /* AppLaunchProvisioner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30009D97809F015EB0BBAE1C /* AppLaunchProvisioner.swift */; };
+		A96F05FAB71B7A24FA6D36D7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2806C17650098D8713793F71 /* Assets.xcassets */; };
+		A9B4058F75B9631363B7D967 /* SpeechFallbackASRRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD5E42F6EFC713F4CF47F475 /* SpeechFallbackASRRuntime.swift */; };
+		AEDCBD3062858F3741A2422D /* CharacterCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 164BE1C8FC8FB6C6C526E9B0 /* CharacterCatalogTests.swift */; };
 		B11805D185EEC48655E7D132 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2EFAC21C557D338EA0457929 /* AVFoundation.framework */; };
 		B680517C676F852D9D5BC789 /* AppLaunchProvisioner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30009D97809F015EB0BBAE1C /* AppLaunchProvisioner.swift */; };
+		BA95F8771BE5DB587353213B /* SpeechChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96E3EA9606BDCB1F0FF174B4 /* SpeechChunker.swift */; };
+		C1FFE8DD38E6CB9664892A03 /* PostCallReviewRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92C197A03FBEB1737F50929 /* PostCallReviewRuntime.swift */; };
+		C2A252CC431C970EC34B9F42 /* PortraitCharacterRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFCCE1142297A07BAB9513A1 /* PortraitCharacterRuntime.swift */; };
 		C2B3E71F2350AFBBD3213B1E /* LiteRTLMRuntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 09CBC9F63A7B83FE65324153 /* LiteRTLMRuntime.xcframework */; };
+		CB37C99EA7D2866219318278 /* PersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFB4091D4B4CD49447D3CB /* PersistenceCoordinator.swift */; };
 		CCB0E528047784991A8BE702 /* PromptComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3939E9D004CA0F3AB2F5C7D5 /* PromptComposer.swift */; };
 		CD8F6CCA25AA329795804CCE /* LiteRTLMRuntime.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 09CBC9F63A7B83FE65324153 /* LiteRTLMRuntime.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CE106728305D43B21C3F5940 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09CAFE39437202EF234D042A /* Protocols.swift */; };
 		CFDD67256501C7EBE3217B41 /* CallView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7BD565C459B5334E8ED1351 /* CallView.swift */; };
+		D58B195448A98A47ED61CE19 /* PostCallReviewRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92C197A03FBEB1737F50929 /* PostCallReviewRuntime.swift */; };
+		D6139CFCDF582AEB9882940D /* SpeechRuntimeFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADE5F81AD77A54DB66B26581 /* SpeechRuntimeFactory.swift */; };
+		D86A9C6E0675C9887DF98A8F /* CallStageLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33E1311C045E1D4BD7D55BEF /* CallStageLayout.swift */; };
 		E47A7F8FE78B6EA13741C427 /* CharacterStageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E23639CB01B04731B5EBFD5 /* CharacterStageView.swift */; };
 		E5A213C8DDCAD54AC8275D88 /* AppLaunchProvisionerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E6E67846FC4015D8CBEFD4C /* AppLaunchProvisionerTests.swift */; };
+		F25124CB6D1AFD3B127460D3 /* PerformanceGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AC56E5B675697DC1E11E4E /* PerformanceGovernor.swift */; };
+		F3B7F2F70735F02CF45A2DD1 /* BundledTTSRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C4D4D7DB1AE916F7A754D7C /* BundledTTSRuntime.swift */; };
+		F3E8F3A3D5A4B869EA94F77E /* SpeechRuntimeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 473A2C706E77FC9F4F15D14C /* SpeechRuntimeModels.swift */; };
+		F7472976C18F95876A137A4E /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 276CFA9ED007D636C753776C /* onnxruntime.xcframework */; };
 		F84998D47D1F192835884391 /* FileMemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32D11D74B30DDFE62D0CA442 /* FileMemoryStore.swift */; };
+		FA421CC6179B57B5BF750CA9 /* PersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65EFB4091D4B4CD49447D3CB /* PersistenceCoordinator.swift */; };
 		FE9B1ED2A6F3023657DB17DA /* ConversationOrchestratorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFE65AA08AD6DBBBD48DB51 /* ConversationOrchestratorTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -104,46 +146,77 @@
 		0874DF40B92BA20F3999D34E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		09CAFE39437202EF234D042A /* Protocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocols.swift; sourceTree = "<group>"; };
 		09CBC9F63A7B83FE65324153 /* LiteRTLMRuntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = LiteRTLMRuntime.xcframework; path = Build/LiteRTLM/LiteRTLMRuntime.xcframework; sourceTree = "<group>"; };
+		0B4D12A9D0A1BA20F9D83040 /* SpeechFallbackTTSRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackTTSRuntime.swift; sourceTree = "<group>"; };
 		0BA8F5DF83F2F163CF9FADD4 /* LiteRTBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = LiteRTBridge.h; sourceTree = "<group>"; };
 		0F1F40DF2A50DD18F62A94D7 /* ModelDownloadManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadManagerTests.swift; sourceTree = "<group>"; };
 		1264357CE76FF1AC252AC0D2 /* AppFilesystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilesystem.swift; sourceTree = "<group>"; };
+		164BE1C8FC8FB6C6C526E9B0 /* CharacterCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterCatalogTests.swift; sourceTree = "<group>"; };
+		1C4D4D7DB1AE916F7A754D7C /* BundledTTSRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledTTSRuntime.swift; sourceTree = "<group>"; };
 		1E10BEB31A9785AB0473575D /* EnglishBuddy-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "EnglishBuddy-Bridging-Header.h"; sourceTree = "<group>"; };
+		1E4825AE11292E21D89A9CD3 /* CharacterPresentationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterPresentationStore.swift; sourceTree = "<group>"; };
+		1EDA99B33001BA9F6589C004 /* sherpa-onnx.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "sherpa-onnx.xcframework"; path = "Build/SherpaOnnx/sherpa-onnx.xcframework"; sourceTree = "<group>"; };
+		2047F31FF0D4FCE146D5AD87 /* SpeechAssetRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechAssetRegistry.swift; sourceTree = "<group>"; };
 		2342CFDEE527F2D8956C33D6 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		262758BF0949821EF8BE85EF /* RootViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootViewModel.swift; sourceTree = "<group>"; };
+		276CFA9ED007D636C753776C /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = onnxruntime.xcframework; path = Build/SherpaOnnx/onnxruntime.xcframework; sourceTree = "<group>"; };
+		2806C17650098D8713793F71 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2B0FE56AEF01068F2BD58547 /* ModelStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStateStore.swift; sourceTree = "<group>"; };
 		2E6E67846FC4015D8CBEFD4C /* AppLaunchProvisionerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchProvisionerTests.swift; sourceTree = "<group>"; };
 		2EFAC21C557D338EA0457929 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		30009D97809F015EB0BBAE1C /* AppLaunchProvisioner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLaunchProvisioner.swift; sourceTree = "<group>"; };
 		321BEB9E91C6E2362FF2073C /* InferenceStreamCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceStreamCoordinator.swift; sourceTree = "<group>"; };
 		32D11D74B30DDFE62D0CA442 /* FileMemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMemoryStore.swift; sourceTree = "<group>"; };
+		3345F9692DB1279F09C47ACB /* StartupTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupTrace.swift; sourceTree = "<group>"; };
+		33E1311C045E1D4BD7D55BEF /* CallStageLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallStageLayout.swift; sourceTree = "<group>"; };
 		34F1B101A05E6475EDEBD4BD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		35EF9F529B03038BC9F8679D /* LiteRTShim.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = LiteRTShim.hpp; sourceTree = "<group>"; };
 		3939E9D004CA0F3AB2F5C7D5 /* PromptComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptComposer.swift; sourceTree = "<group>"; };
 		3E23639CB01B04731B5EBFD5 /* CharacterStageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterStageView.swift; sourceTree = "<group>"; };
+		473A2C706E77FC9F4F15D14C /* SpeechRuntimeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRuntimeModels.swift; sourceTree = "<group>"; };
 		4CFE65AA08AD6DBBBD48DB51 /* ConversationOrchestratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationOrchestratorTests.swift; sourceTree = "<group>"; };
 		54591E80EFCFDABEEBB47C33 /* EnglishBuddyCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = EnglishBuddyCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		545BA8E61B5BA18FB525529C /* FileMemoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileMemoryStoreTests.swift; sourceTree = "<group>"; };
+		58D839FBC6B57EDD2D01E7C4 /* AppFilesystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilesystemTests.swift; sourceTree = "<group>"; };
 		5CB16A1738809D58892EBC8C /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarView.swift; sourceTree = "<group>"; };
+		65EFB4091D4B4CD49447D3CB /* PersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceCoordinator.swift; sourceTree = "<group>"; };
+		6679AC2E9987C2BF181EE5B4 /* SherpaOnnxBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SherpaOnnxBridge.h; sourceTree = "<group>"; };
+		6D933114521DCAFBE54A80F8 /* UserPortrait.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = UserPortrait.jpg; sourceTree = "<group>"; };
 		7021F2F0CB67028F6DDBB2CB /* LiteRTInferenceEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiteRTInferenceEngine.swift; sourceTree = "<group>"; };
 		71EF848BA36997E1988EBF73 /* LiteRTShim.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = LiteRTShim.cpp; sourceTree = "<group>"; };
 		735AB0794B2A999BC93B3B98 /* EnglishBuddy.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EnglishBuddy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7A6480677BACC92A92E416A5 /* GemmaModelConstraintProvider.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = GemmaModelConstraintProvider.xcframework; path = Build/LiteRTLM/GemmaModelConstraintProvider.xcframework; sourceTree = "<group>"; };
 		7AC6A29F66B4542C0EFE0899 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		7F3262F7CF8A8A6983DFA97B /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+		869725314E14477336378E5F /* BundledASRRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledASRRuntime.swift; sourceTree = "<group>"; };
 		8857F8633D805FBFC46EA24F /* QuickStartSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickStartSheet.swift; sourceTree = "<group>"; };
 		89BB7B0C514B5948FB495D09 /* EnglishBuddyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnglishBuddyApp.swift; sourceTree = "<group>"; };
 		8CE8647B09CFA5E989174683 /* FeedbackGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackGenerator.swift; sourceTree = "<group>"; };
 		9001CE969F3AA5DA51EDE814 /* ConversationOrchestrator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationOrchestrator.swift; sourceTree = "<group>"; };
 		959F8C219CC0AA979BF7FA24 /* FeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackView.swift; sourceTree = "<group>"; };
+		96E3EA9606BDCB1F0FF174B4 /* SpeechChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechChunker.swift; sourceTree = "<group>"; };
+		A3AC56E5B675697DC1E11E4E /* PerformanceGovernor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceGovernor.swift; sourceTree = "<group>"; };
 		A6122E1BBB4EE162320B5FD0 /* LiveSpeechPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSpeechPipeline.swift; sourceTree = "<group>"; };
 		A7BD565C459B5334E8ED1351 /* CallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallView.swift; sourceTree = "<group>"; };
+		A92C197A03FBEB1737F50929 /* PostCallReviewRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostCallReviewRuntime.swift; sourceTree = "<group>"; };
 		A98972352FD646AAB0BD2391 /* ModelDownloadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadManager.swift; sourceTree = "<group>"; };
+		ADE5F81AD77A54DB66B26581 /* SpeechRuntimeFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRuntimeFactory.swift; sourceTree = "<group>"; };
 		AEA12F646B8339023EED2F08 /* EnglishBuddyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EnglishBuddyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B376CFA9719E21DDA47126A8 /* UserDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserDataStore.swift; sourceTree = "<group>"; };
 		B40C59CE9ADB2CA6569FB22C /* InferenceStreamCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceStreamCoordinatorTests.swift; sourceTree = "<group>"; };
 		B50A3599EA18F1CE9E4FE40F /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		B581D29AE8E0379438337746 /* SherpaOnnxBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = SherpaOnnxBridge.mm; sourceTree = "<group>"; };
+		B747298E2D1E6AECD8EE1305 /* PortraitTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitTypes.swift; sourceTree = "<group>"; };
+		BEC877C745E4EA615CD6B45E /* BundledSpeechAssetRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledSpeechAssetRegistryTests.swift; sourceTree = "<group>"; };
 		C14855F5338F51762F9FDFDF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		C2A0424CBBC8C83544ABC4B0 /* Speech.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Speech.framework; path = System/Library/Frameworks/Speech.framework; sourceTree = SDKROOT; };
+		C76C0AFEFCF02A822212174A /* CharacterSpeechDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterSpeechDriver.swift; sourceTree = "<group>"; };
+		CAB6E98BA701D17BA3EF2819 /* DuplexAudioRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DuplexAudioRuntime.swift; sourceTree = "<group>"; };
+		CEA29186FF83710B52100930 /* DevicePerformanceProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePerformanceProfile.swift; sourceTree = "<group>"; };
 		CF98F7E8949E00123DC577FC /* CallStartupCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallStartupCoordinatorTests.swift; sourceTree = "<group>"; };
+		CFCCE1142297A07BAB9513A1 /* PortraitCharacterRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitCharacterRuntime.swift; sourceTree = "<group>"; };
 		D5B1E623D51246B88D7B2567 /* FeedbackGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackGeneratorTests.swift; sourceTree = "<group>"; };
+		DD5E42F6EFC713F4CF47F475 /* SpeechFallbackASRRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackASRRuntime.swift; sourceTree = "<group>"; };
+		E27974B702203C80AC90C333 /* AssetStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetStateStore.swift; sourceTree = "<group>"; };
 		EF8674E7ED81F565A9EFFF07 /* LiteRTBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = LiteRTBridge.mm; sourceTree = "<group>"; };
 		F4568D3CC37394A303873BB5 /* Network.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Network.framework; path = System/Library/Frameworks/Network.framework; sourceTree = SDKROOT; };
 		FA04F557A46C620C0C2E11F3 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -159,6 +232,8 @@
 				1240454AD3BD06B6ABA7C239 /* Network.framework in Frameworks */,
 				C2B3E71F2350AFBBD3213B1E /* LiteRTLMRuntime.xcframework in Frameworks */,
 				2684F7C37820964852302D4D /* GemmaModelConstraintProvider.xcframework in Frameworks */,
+				6F5EBEE20B552F99929A52C1 /* sherpa-onnx.xcframework in Frameworks */,
+				F7472976C18F95876A137A4E /* onnxruntime.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -176,8 +251,11 @@
 		045417C9F2D1BAD41688D210 /* EnglishBuddyTests */ = {
 			isa = PBXGroup;
 			children = (
+				58D839FBC6B57EDD2D01E7C4 /* AppFilesystemTests.swift */,
 				2E6E67846FC4015D8CBEFD4C /* AppLaunchProvisionerTests.swift */,
+				BEC877C745E4EA615CD6B45E /* BundledSpeechAssetRegistryTests.swift */,
 				CF98F7E8949E00123DC577FC /* CallStartupCoordinatorTests.swift */,
+				164BE1C8FC8FB6C6C526E9B0 /* CharacterCatalogTests.swift */,
 				4CFE65AA08AD6DBBBD48DB51 /* ConversationOrchestratorTests.swift */,
 				D5B1E623D51246B88D7B2567 /* FeedbackGeneratorTests.swift */,
 				545BA8E61B5BA18FB525529C /* FileMemoryStoreTests.swift */,
@@ -193,8 +271,10 @@
 			children = (
 				1264357CE76FF1AC252AC0D2 /* AppFilesystem.swift */,
 				30009D97809F015EB0BBAE1C /* AppLaunchProvisioner.swift */,
+				E27974B702203C80AC90C333 /* AssetStateStore.swift */,
 				06C8D8A5D08B3EBCF7D0722A /* CallStartupCoordinator.swift */,
 				9001CE969F3AA5DA51EDE814 /* ConversationOrchestrator.swift */,
+				CEA29186FF83710B52100930 /* DevicePerformanceProfile.swift */,
 				8CE8647B09CFA5E989174683 /* FeedbackGenerator.swift */,
 				32D11D74B30DDFE62D0CA442 /* FileMemoryStore.swift */,
 				321BEB9E91C6E2362FF2073C /* InferenceStreamCoordinator.swift */,
@@ -202,8 +282,18 @@
 				A6122E1BBB4EE162320B5FD0 /* LiveSpeechPipeline.swift */,
 				A98972352FD646AAB0BD2391 /* ModelDownloadManager.swift */,
 				2342CFDEE527F2D8956C33D6 /* Models.swift */,
+				2B0FE56AEF01068F2BD58547 /* ModelStateStore.swift */,
+				A3AC56E5B675697DC1E11E4E /* PerformanceGovernor.swift */,
+				65EFB4091D4B4CD49447D3CB /* PersistenceCoordinator.swift */,
+				B747298E2D1E6AECD8EE1305 /* PortraitTypes.swift */,
+				A92C197A03FBEB1737F50929 /* PostCallReviewRuntime.swift */,
 				3939E9D004CA0F3AB2F5C7D5 /* PromptComposer.swift */,
 				09CAFE39437202EF234D042A /* Protocols.swift */,
+				2047F31FF0D4FCE146D5AD87 /* SpeechAssetRegistry.swift */,
+				96E3EA9606BDCB1F0FF174B4 /* SpeechChunker.swift */,
+				473A2C706E77FC9F4F15D14C /* SpeechRuntimeModels.swift */,
+				3345F9692DB1279F09C47ACB /* StartupTrace.swift */,
+				B376CFA9719E21DDA47126A8 /* UserDataStore.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -215,6 +305,8 @@
 				7A6480677BACC92A92E416A5 /* GemmaModelConstraintProvider.xcframework */,
 				09CBC9F63A7B83FE65324153 /* LiteRTLMRuntime.xcframework */,
 				F4568D3CC37394A303873BB5 /* Network.framework */,
+				276CFA9ED007D636C753776C /* onnxruntime.xcframework */,
+				1EDA99B33001BA9F6589C004 /* sherpa-onnx.xcframework */,
 				C2A0424CBBC8C83544ABC4B0 /* Speech.framework */,
 			);
 			name = Frameworks;
@@ -227,6 +319,7 @@
 				DA2782B202B0D0CED9D2F6B7 /* Bridge */,
 				0AA36949D79893EA923AE0B3 /* Core */,
 				76D8C79EEB5F0972E494ACC8 /* Features */,
+				8FA67708A27F92CCB284312F /* Speech */,
 				83F2D779AA8C978A7E31E50A /* Support */,
 			);
 			path = EnglishBuddy;
@@ -237,6 +330,7 @@
 			children = (
 				56063F6C1B1FFFB23FD18D11 /* EnglishBuddy */,
 				045417C9F2D1BAD41688D210 /* EnglishBuddyTests */,
+				89D79C239D029868FFE46F82 /* Resources */,
 				21238AFF543FBA7E1798277D /* Frameworks */,
 				7F00DE058FA1E6BDBB7818B6 /* Products */,
 			);
@@ -246,11 +340,15 @@
 			isa = PBXGroup;
 			children = (
 				5CB16A1738809D58892EBC8C /* AvatarView.swift */,
+				33E1311C045E1D4BD7D55BEF /* CallStageLayout.swift */,
 				A7BD565C459B5334E8ED1351 /* CallView.swift */,
+				1E4825AE11292E21D89A9CD3 /* CharacterPresentationStore.swift */,
+				C76C0AFEFCF02A822212174A /* CharacterSpeechDriver.swift */,
 				3E23639CB01B04731B5EBFD5 /* CharacterStageView.swift */,
 				959F8C219CC0AA979BF7FA24 /* FeedbackView.swift */,
 				7AC6A29F66B4542C0EFE0899 /* HistoryView.swift */,
 				B50A3599EA18F1CE9E4FE40F /* HomeView.swift */,
+				CFCCE1142297A07BAB9513A1 /* PortraitCharacterRuntime.swift */,
 				8857F8633D805FBFC46EA24F /* QuickStartSheet.swift */,
 				FA04F557A46C620C0C2E11F3 /* RootView.swift */,
 				C14855F5338F51762F9FDFDF /* SettingsView.swift */,
@@ -276,6 +374,29 @@
 			path = Support;
 			sourceTree = "<group>";
 		};
+		89D79C239D029868FFE46F82 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				2806C17650098D8713793F71 /* Assets.xcassets */,
+				6D933114521DCAFBE54A80F8 /* UserPortrait.jpg */,
+			);
+			name = Resources;
+			path = EnglishBuddy/Resources;
+			sourceTree = "<group>";
+		};
+		8FA67708A27F92CCB284312F /* Speech */ = {
+			isa = PBXGroup;
+			children = (
+				869725314E14477336378E5F /* BundledASRRuntime.swift */,
+				1C4D4D7DB1AE916F7A754D7C /* BundledTTSRuntime.swift */,
+				CAB6E98BA701D17BA3EF2819 /* DuplexAudioRuntime.swift */,
+				DD5E42F6EFC713F4CF47F475 /* SpeechFallbackASRRuntime.swift */,
+				0B4D12A9D0A1BA20F9D83040 /* SpeechFallbackTTSRuntime.swift */,
+				ADE5F81AD77A54DB66B26581 /* SpeechRuntimeFactory.swift */,
+			);
+			path = Speech;
+			sourceTree = "<group>";
+		};
 		9D8D3C0224C8187C7B819C68 /* App */ = {
 			isa = PBXGroup;
 			children = (
@@ -294,6 +415,8 @@
 				EF8674E7ED81F565A9EFFF07 /* LiteRTBridge.mm */,
 				71EF848BA36997E1988EBF73 /* LiteRTShim.cpp */,
 				35EF9F529B03038BC9F8679D /* LiteRTShim.hpp */,
+				6679AC2E9987C2BF181EE5B4 /* SherpaOnnxBridge.h */,
+				B581D29AE8E0379438337746 /* SherpaOnnxBridge.mm */,
 			);
 			path = Bridge;
 			sourceTree = "<group>";
@@ -343,8 +466,11 @@
 			buildConfigurationList = C13559CFDCCA8A73B9E76E8E /* Build configuration list for PBXNativeTarget "EnglishBuddy" */;
 			buildPhases = (
 				3A7EDBED143CE64BBE4F10E2 /* Build LiteRT Runtime */,
+				E7A58DCBA86B042977A8F5C4 /* Prepare Sherpa Runtime */,
 				6CD9C0F482F88842498CE825 /* Embed Bundled Model */,
+				DD33FC7767A354448B495F39 /* Embed Speech Assets */,
 				99BD5A4CFA0F09947E0FBC74 /* Sources */,
+				DE3D81B5FF2EDEA33F2ADC50 /* Resources */,
 				07C3E1F20EBDCE6A0F47D4CD /* Frameworks */,
 				BBD9D28349E8C0EC04B46B74 /* Embed Frameworks */,
 			);
@@ -369,13 +495,13 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					B1B8AF1F7645504C914372AC = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 8KQ9K7AWKK;
 					};
 					C3B10E901BD7191D35A6C1FC = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 8KQ9K7AWKK;
 					};
 					D22DB0A1349E6A0E1FF67825 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 8KQ9K7AWKK;
 					};
 				};
 			};
@@ -400,10 +526,21 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		DE3D81B5FF2EDEA33F2ADC50 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A96F05FAB71B7A24FA6D36D7 /* Assets.xcassets in Resources */,
+				0164A85F46C7EF04DC5BEB13 /* UserPortrait.jpg in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXShellScriptBuildPhase section */
 		3A7EDBED143CE64BBE4F10E2 /* Build LiteRT Runtime */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -415,6 +552,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(SRCROOT)/Build/LiteRTLM/build.stamp",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -422,7 +560,6 @@
 		};
 		6CD9C0F482F88842498CE825 /* Embed Bundled Model */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -434,10 +571,51 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/EmbeddedModels/gemma-4-e2b/EmbeddedModelMetadata.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/EmbeddedModels/gemma-4-e2b/gemma-4-E2B-it.litertlm",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "set -euo pipefail\n\"${SRCROOT}/Scripts/embed_bundled_model.sh\"\n";
+		};
+		DD33FC7767A354448B495F39 /* Embed Speech Assets */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Speech Assets";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SpeechAssets/Manifest.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SpeechAssets/RuntimeBuild.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\"${SRCROOT}/Scripts/embed_speech_assets.sh\"\n";
+		};
+		E7A58DCBA86B042977A8F5C4 /* Prepare Sherpa Runtime */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Prepare Sherpa Runtime";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Build/SherpaOnnx/build.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n\"${SRCROOT}/Scripts/prepare_sherpa_onnx_runtime.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -446,8 +624,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3091965E721A5A41BAC90669 /* AppFilesystemTests.swift in Sources */,
 				E5A213C8DDCAD54AC8275D88 /* AppLaunchProvisionerTests.swift in Sources */,
+				7A64B6FE934610632A0C83D4 /* BundledSpeechAssetRegistryTests.swift in Sources */,
 				10801833721E8E76B7B30AED /* CallStartupCoordinatorTests.swift in Sources */,
+				AEDCBD3062858F3741A2422D /* CharacterCatalogTests.swift in Sources */,
 				FE9B1ED2A6F3023657DB17DA /* ConversationOrchestratorTests.swift in Sources */,
 				1E0BF2EA24F73B41A90B62BF /* FeedbackGeneratorTests.swift in Sources */,
 				487B15AC89AD6ED0252B5BCA /* FileMemoryStoreTests.swift in Sources */,
@@ -463,11 +644,19 @@
 				892F84660DBF4D78992726EA /* AppContainer.swift in Sources */,
 				835252F20EE8CA5610B6FEB5 /* AppFilesystem.swift in Sources */,
 				B680517C676F852D9D5BC789 /* AppLaunchProvisioner.swift in Sources */,
+				5598AAFD327AD9568B763F7B /* AssetStateStore.swift in Sources */,
 				9F13494144274FB8309C4B59 /* AvatarView.swift in Sources */,
+				0B5C3ACC2FD4AB6825C7BE92 /* BundledASRRuntime.swift in Sources */,
+				F3B7F2F70735F02CF45A2DD1 /* BundledTTSRuntime.swift in Sources */,
+				D86A9C6E0675C9887DF98A8F /* CallStageLayout.swift in Sources */,
 				356901A1707EF07068691D65 /* CallStartupCoordinator.swift in Sources */,
 				CFDD67256501C7EBE3217B41 /* CallView.swift in Sources */,
+				61CFFAF240407C8012EB29E8 /* CharacterPresentationStore.swift in Sources */,
+				62D71D13AAF117680ABE5EDA /* CharacterSpeechDriver.swift in Sources */,
 				E47A7F8FE78B6EA13741C427 /* CharacterStageView.swift in Sources */,
 				8BB3A238F549C429D3CD0313 /* ConversationOrchestrator.swift in Sources */,
+				93B845B167BC33444AB1948E /* DevicePerformanceProfile.swift in Sources */,
+				5D65CF9936813F093B9381FB /* DuplexAudioRuntime.swift in Sources */,
 				49F009CE345E95D692597012 /* EnglishBuddyApp.swift in Sources */,
 				10C9B3E40FF403AB78733151 /* FeedbackGenerator.swift in Sources */,
 				8D9128A1C71191D6593E13C1 /* FeedbackView.swift in Sources */,
@@ -480,13 +669,28 @@
 				8BC599600DAE5B3F1A433BCC /* LiteRTShim.cpp in Sources */,
 				2B9BF3E19B5AC1C68DE85500 /* LiveSpeechPipeline.swift in Sources */,
 				1A2C399551F15B590B446126 /* ModelDownloadManager.swift in Sources */,
+				43CB05AF1B194A3BEDD2D576 /* ModelStateStore.swift in Sources */,
 				9B6C58D10FEC17F210263C44 /* Models.swift in Sources */,
+				972A5D5F7E1B6A2D35E4C061 /* PerformanceGovernor.swift in Sources */,
+				FA421CC6179B57B5BF750CA9 /* PersistenceCoordinator.swift in Sources */,
+				C2A252CC431C970EC34B9F42 /* PortraitCharacterRuntime.swift in Sources */,
+				7B71195B0EC0C04AB35A1675 /* PortraitTypes.swift in Sources */,
+				C1FFE8DD38E6CB9664892A03 /* PostCallReviewRuntime.swift in Sources */,
 				CCB0E528047784991A8BE702 /* PromptComposer.swift in Sources */,
 				8F32A35E60423991CDCA1341 /* Protocols.swift in Sources */,
 				8F6A0C638FF98D0AEA5D5D2A /* QuickStartSheet.swift in Sources */,
 				291643E476C1373EC0AF8195 /* RootView.swift in Sources */,
 				8233F500C045B7D1B0A20B9C /* RootViewModel.swift in Sources */,
 				272954A2B0969F17DCD09909 /* SettingsView.swift in Sources */,
+				8EF61B93E6810EE1BD0503CA /* SherpaOnnxBridge.mm in Sources */,
+				821537660E31162D94906FF1 /* SpeechAssetRegistry.swift in Sources */,
+				3CE65E49C2E59FDF2D7FFE66 /* SpeechChunker.swift in Sources */,
+				A9B4058F75B9631363B7D967 /* SpeechFallbackASRRuntime.swift in Sources */,
+				47ED2BDBDEE55FC2956C11D8 /* SpeechFallbackTTSRuntime.swift in Sources */,
+				D6139CFCDF582AEB9882940D /* SpeechRuntimeFactory.swift in Sources */,
+				F3E8F3A3D5A4B869EA94F77E /* SpeechRuntimeModels.swift in Sources */,
+				9F4C6E12C0247239BE084CB5 /* StartupTrace.swift in Sources */,
+				7A84372F14931BC3AEA34C2E /* UserDataStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -496,15 +700,27 @@
 			files = (
 				7DCC668E606F6D07EB63E155 /* AppFilesystem.swift in Sources */,
 				A71D5D4E56A9C04B53D7C444 /* AppLaunchProvisioner.swift in Sources */,
+				9CD734A9DE8DA822064544F7 /* AssetStateStore.swift in Sources */,
 				89D61ED80F4D06285577691D /* CallStartupCoordinator.swift in Sources */,
 				6CA9089CE496986B4AEB9ECA /* ConversationOrchestrator.swift in Sources */,
+				0FEE06447431A80E991608AE /* DevicePerformanceProfile.swift in Sources */,
 				84D2D3876027C0BF618A3C13 /* FeedbackGenerator.swift in Sources */,
 				F84998D47D1F192835884391 /* FileMemoryStore.swift in Sources */,
 				8AC54D11F55DCD29074F52B8 /* InferenceStreamCoordinator.swift in Sources */,
 				34500F668EE0C75094879B2E /* ModelDownloadManager.swift in Sources */,
+				0038A421B5D100AB4DD259E3 /* ModelStateStore.swift in Sources */,
 				5AAE310C32E81518608123E7 /* Models.swift in Sources */,
+				F25124CB6D1AFD3B127460D3 /* PerformanceGovernor.swift in Sources */,
+				CB37C99EA7D2866219318278 /* PersistenceCoordinator.swift in Sources */,
+				3BA250AA6F4489842D932FA8 /* PortraitTypes.swift in Sources */,
+				D58B195448A98A47ED61CE19 /* PostCallReviewRuntime.swift in Sources */,
 				790026575DA56B5023C33D2C /* PromptComposer.swift in Sources */,
 				CE106728305D43B21C3F5940 /* Protocols.swift in Sources */,
+				0D934B090B11B99FA06A18FA /* SpeechAssetRegistry.swift in Sources */,
+				BA95F8771BE5DB587353213B /* SpeechChunker.swift in Sources */,
+				846C0DABACC168BEFA4EECDF /* SpeechRuntimeModels.swift in Sources */,
+				A3539598503A08A858854C20 /* StartupTrace.swift in Sources */,
+				00A9033FF77DDD41FC4A3A4D /* UserDataStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -567,12 +783,24 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_CODE_COVERAGE = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_CODE_COVERAGE = NO;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_PREVIEWS = NO;
+				ENABLE_TESTABILITY = NO;
+				ENGLISHBUDDY_ENABLE_PIPER = 1;
+				ENGLISHBUDDY_ENABLE_SHERPA_ONNX = 1;
+				ENGLISHBUDDY_LINK_PIPER = 1;
+				ENGLISHBUDDY_LINK_SHERPA_ONNX = 1;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Build/LiteRTLM\"",
+					"\"Build/SherpaOnnx\"",
 				);
+				GCC_GENERATE_TEST_COVERAGE_FILES = NO;
+				GCC_INSTRUMENT_PROGRAM_FLOW_ARCS = NO;
 				INFOPLIST_FILE = EnglishBuddy/Support/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -621,7 +849,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8KQ9K7AWKK;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -689,7 +917,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 8KQ9K7AWKK;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -733,10 +961,15 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENGLISHBUDDY_ENABLE_PIPER = 1;
+				ENGLISHBUDDY_ENABLE_SHERPA_ONNX = 1;
+				ENGLISHBUDDY_LINK_PIPER = 1;
+				ENGLISHBUDDY_LINK_SHERPA_ONNX = 1;
 				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Build/LiteRTLM\"",
+					"\"Build/SherpaOnnx\"",
 				);
 				INFOPLIST_FILE = EnglishBuddy/Support/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

@@ -6,7 +6,7 @@ options:
 settings:
   base:
     PRODUCT_BUNDLE_IDENTIFIER: com.hammond.EnglishBuddy
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "8KQ9K7AWKK"
     SWIFT_VERSION: "6.0"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "1"
@@ -45,9 +45,22 @@ targets:
         PRODUCT_NAME: EnglishBuddy
         TARGETED_DEVICE_FAMILY: "1"
         "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
+        ENGLISHBUDDY_ENABLE_SHERPA_ONNX: "1"
+        ENGLISHBUDDY_ENABLE_PIPER: "1"
+        ENGLISHBUDDY_LINK_SHERPA_ONNX: "1"
+        ENGLISHBUDDY_LINK_PIPER: "1"
         LD_RUNPATH_SEARCH_PATHS:
           - $(inherited)
           - "@executable_path/Frameworks"
+      configs:
+        Debug:
+          CLANG_ENABLE_CODE_COVERAGE: NO
+          ENABLE_CODE_COVERAGE: NO
+          ENABLE_DEBUG_DYLIB: NO
+          ENABLE_PREVIEWS: NO
+          ENABLE_TESTABILITY: NO
+          GCC_GENERATE_TEST_COVERAGE_FILES: NO
+          GCC_INSTRUMENT_PROGRAM_FLOW_ARCS: NO
     info:
       path: EnglishBuddy/Support/Info.plist
       properties:
@@ -65,19 +78,35 @@ targets:
       - path: EnglishBuddy
         excludes:
           - Resources
-    resources:
       - path: EnglishBuddy/Resources
+        buildPhase: resources
     preBuildScripts:
       - name: Build LiteRT Runtime
         script: |
           set -euo pipefail
           "${SRCROOT}/Scripts/build_litert_ios_runtime.sh"
-        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(SRCROOT)/Build/LiteRTLM/build.stamp
+      - name: Prepare Sherpa Runtime
+        script: |
+          set -euo pipefail
+          "${SRCROOT}/Scripts/prepare_sherpa_onnx_runtime.sh"
+        outputFiles:
+          - $(SRCROOT)/Build/SherpaOnnx/build.stamp
       - name: Embed Bundled Model
         script: |
           set -euo pipefail
           "${SRCROOT}/Scripts/embed_bundled_model.sh"
-        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/EmbeddedModels/gemma-4-e2b/EmbeddedModelMetadata.json
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/EmbeddedModels/gemma-4-e2b/gemma-4-E2B-it.litertlm
+      - name: Embed Speech Assets
+        script: |
+          set -euo pipefail
+          "${SRCROOT}/Scripts/embed_speech_assets.sh"
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SpeechAssets/Manifest.json
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/SpeechAssets/RuntimeBuild.json
     dependencies:
       - sdk: AVFoundation.framework
       - sdk: Speech.framework
@@ -88,6 +117,12 @@ targets:
       - framework: Build/LiteRTLM/GemmaModelConstraintProvider.xcframework
         embed: true
         codeSign: true
+      - framework: Build/SherpaOnnx/sherpa-onnx.xcframework
+        embed: false
+        codeSign: false
+      - framework: Build/SherpaOnnx/onnxruntime.xcframework
+        embed: false
+        codeSign: false
   EnglishBuddyTests:
     type: bundle.unit-test
     platform: iOS
@@ -113,6 +148,6 @@ schemes:
         EnglishBuddy: all
         EnglishBuddyTests: [test]
     test:
-      gatherCoverageData: true
+      gatherCoverageData: false
       targets:
         - EnglishBuddyTests

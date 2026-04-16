@@ -4,23 +4,38 @@ struct FeedbackView: View {
     let report: FeedbackReport
     let mode: ConversationMode
     let character: CharacterProfile?
+    let scene: CharacterScene?
     let scenario: ScenarioPreset?
     let learningPlan: LearningFocusPlan?
+    let visualStyle: VideoCallVisualStyle
+    let continueThreadAction: (() -> Void)?
+    let replayMissionAction: (() -> Void)?
+    let nextThemeAction: (() -> Void)?
     let dismissAction: () -> Void
 
     init(
         report: FeedbackReport,
         mode: ConversationMode,
         character: CharacterProfile? = nil,
+        scene: CharacterScene? = nil,
         scenario: ScenarioPreset? = nil,
         learningPlan: LearningFocusPlan? = nil,
+        visualStyle: VideoCallVisualStyle = .natural,
+        continueThreadAction: (() -> Void)? = nil,
+        replayMissionAction: (() -> Void)? = nil,
+        nextThemeAction: (() -> Void)? = nil,
         dismissAction: @escaping () -> Void
     ) {
         self.report = report
         self.mode = mode
         self.character = character
+        self.scene = scene
         self.scenario = scenario
         self.learningPlan = learningPlan
+        self.visualStyle = visualStyle
+        self.continueThreadAction = continueThreadAction
+        self.replayMissionAction = replayMissionAction
+        self.nextThemeAction = nextThemeAction
         self.dismissAction = dismissAction
     }
 
@@ -30,12 +45,15 @@ struct FeedbackView: View {
                 AppCanvasBackground()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: 18) {
                         heroSummary
                         missionDashboard
                         correctionBoard
                         languageCarryOver
                         nextCallBoard
+                        if hasActionPanel {
+                            actionPanel
+                        }
                     }
                     .padding(20)
                 }
@@ -67,9 +85,28 @@ struct FeedbackView: View {
 
                 Spacer(minLength: 16)
 
-                VStack(alignment: .trailing, spacing: 8) {
-                    FeedbackBadge(text: mode.title)
-                    FeedbackBadge(text: report.generatedAt.formatted(date: .abbreviated, time: .shortened))
+                    VStack(alignment: .trailing, spacing: 10) {
+                        if let character, let scene {
+                            CharacterStageSurface(
+                                character: character,
+                            scene: scene,
+                            visualStyle: visualStyle,
+                            emphasis: .preview,
+                            surfaceKind: .feedbackHero,
+                            size: CGSize(width: 92, height: 112),
+                            isAnimated: false,
+                            showsBackdrop: false,
+                            groundShadowWidth: 68,
+                            groundShadowHeight: 12,
+                            groundShadowBlur: 8
+                        )
+                    }
+
+                    VStack(alignment: .trailing, spacing: 8) {
+                        FeedbackBadge(text: mode.title)
+                        FeedbackBadge(text: report.referenceAccentDisplayName)
+                        FeedbackBadge(text: report.generatedAt.formatted(date: .abbreviated, time: .shortened))
+                    }
                 }
             }
 
@@ -79,6 +116,10 @@ struct FeedbackView: View {
                     .foregroundStyle(.white.opacity(0.88))
             }
 
+            Label("Reference Accent: \(report.referenceAccentDisplayName)", systemImage: "waveform.and.person.filled")
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.88))
+
             if report.nextMission.isEmpty == false {
                 Text(report.nextMission)
                     .font(.system(.headline, design: .rounded, weight: .bold))
@@ -87,8 +128,18 @@ struct FeedbackView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color.white.opacity(0.12))
+                            .fill(Color.black.opacity(0.20))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                            )
                     )
+            }
+
+            if report.continuationCue.isEmpty == false {
+                Text(report.continuationCue)
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.86))
             }
         }
         .padding(22)
@@ -170,12 +221,58 @@ struct FeedbackView: View {
 
             DashboardRow(title: "Recommended next mission", content: report.nextMission)
 
+            if report.nextThemeSuggestion.isEmpty == false {
+                DashboardRow(title: "Next theme suggestion", content: report.nextThemeSuggestion)
+            }
+
             DashboardRow(
-                title: mode == .tutor ? "Follow-up drill" : "Follow-up topic",
+                title: mode == .tutor ? "Continuation cue" : "Follow-up topic",
                 content: report.nextTopicSuggestions.isEmpty
-                    ? "Repeat the same character and add one more vivid detail."
+                    ? report.continuationCue
                     : report.nextTopicSuggestions.joined(separator: " • ")
             )
+        }
+        .panelStyle()
+    }
+
+    private var hasActionPanel: Bool {
+        continueThreadAction != nil || replayMissionAction != nil || nextThemeAction != nil
+    }
+
+    private var actionPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Launch Next Step")
+                .font(.system(.title3, design: .rounded, weight: .bold))
+
+            if let continueThreadAction {
+                FeedbackActionButton(
+                    title: "Continue This Thread",
+                    subtitle: report.continuationCue,
+                    systemImage: "arrow.clockwise.circle.fill",
+                    tint: Color(red: 0.22, green: 0.45, blue: 0.70),
+                    action: continueThreadAction
+                )
+            }
+
+            if let replayMissionAction {
+                FeedbackActionButton(
+                    title: "Start Next Mission",
+                    subtitle: report.nextMission,
+                    systemImage: "flag.checkered.2.crossed",
+                    tint: Color(red: 0.17, green: 0.39, blue: 0.33),
+                    action: replayMissionAction
+                )
+            }
+
+            if let nextThemeAction {
+                FeedbackActionButton(
+                    title: "Try Another Theme",
+                    subtitle: report.nextThemeSuggestion,
+                    systemImage: "sparkles.tv",
+                    tint: Color(red: 0.88, green: 0.43, blue: 0.27),
+                    action: nextThemeAction
+                )
+            }
         }
         .panelStyle()
     }
@@ -199,7 +296,56 @@ private struct FeedbackBadge: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Capsule().fill(Color.white.opacity(0.16)))
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.24))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    )
+            )
+    }
+}
+
+private struct FeedbackActionButton: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let tint: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(Circle().fill(tint))
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(.headline, design: .rounded, weight: .bold))
+                        .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                    Text(subtitle.isEmpty ? "Open the next step." : subtitle)
+                        .font(.system(.subheadline, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.51, green: 0.46, blue: 0.42))
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -254,14 +400,24 @@ private struct CorrectionGroup: View {
                         if item.source.isEmpty == false {
                             Text("From: \(item.source)")
                                 .font(.system(.caption2, design: .rounded, weight: .semibold))
-                                .foregroundStyle(tint)
+                                .foregroundStyle(Color(red: 0.30, green: 0.27, blue: 0.33))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Capsule()
+                                        .fill(tint.opacity(0.18))
+                                )
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(14)
                     .background(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(tint.opacity(0.1))
+                            .fill(tint.opacity(0.12))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .stroke(tint.opacity(0.16), lineWidth: 1)
+                            )
                     )
                 }
             }

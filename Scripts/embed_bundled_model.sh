@@ -12,6 +12,9 @@ EXPECTED_MODEL_SIZE="2583085056"
 CACHE_DIR="${ROOT_DIR}/Build/EmbeddedModelCache"
 CACHE_MODEL_PATH="${CACHE_DIR}/${MODEL_FILENAME}"
 CACHE_METADATA_PATH="${CACHE_DIR}/EmbeddedModelMetadata.json"
+RELEASE_PREP_DIR="${ROOT_DIR}/Build/ReleasePrep/EmbeddedModels/${MODEL_ID}"
+RELEASE_PREP_MODEL_PATH="${RELEASE_PREP_DIR}/${MODEL_FILENAME}"
+RELEASE_PREP_METADATA_PATH="${RELEASE_PREP_DIR}/EmbeddedModelMetadata.json"
 
 if [[ "${PLATFORM_NAME:-}" != "iphoneos" && "${PLATFORM_NAME:-}" != "iphonesimulator" ]]; then
   echo "Skipping bundled model embed for unsupported platform ${PLATFORM_NAME:-unknown}."
@@ -33,6 +36,12 @@ APP_MODEL_PATH="${APP_MODEL_DIR}/${MODEL_FILENAME}"
 APP_METADATA_PATH="${APP_MODEL_DIR}/EmbeddedModelMetadata.json"
 LEGACY_APP_MODEL_PATH="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EmbeddedModels/${MODEL_FILENAME}"
 LEGACY_APP_METADATA_PATH="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/EmbeddedModels/EmbeddedModelMetadata.json"
+
+if [[ "${ENGLISHBUDDY_STAGE_BUNDLED_BASE_TO_APP_SUPPORT:-0}" == "1" ]]; then
+  echo "Skipping bundled model embed because ENGLISHBUDDY_STAGE_BUNDLED_BASE_TO_APP_SUPPORT=1." >&2
+  rm -f "${APP_MODEL_PATH}" "${APP_METADATA_PATH}" "${LEGACY_APP_MODEL_PATH}" "${LEGACY_APP_METADATA_PATH}"
+  exit 0
+fi
 
 mkdir -p "${CACHE_DIR}" "${APP_MODEL_DIR}"
 
@@ -95,9 +104,19 @@ resolve_source_model_path() {
     return
   fi
 
+  if ensure_expected_size "${RELEASE_PREP_MODEL_PATH}"; then
+    echo "${RELEASE_PREP_MODEL_PATH}"
+    return
+  fi
+
   if ensure_expected_size "${CACHE_MODEL_PATH}"; then
     echo "${CACHE_MODEL_PATH}"
     return
+  fi
+
+  if [[ "${ENGLISHBUDDY_ALLOW_NETWORK_PREP:-0}" != "1" ]]; then
+    echo "Bundled model is not staged locally. Run Scripts/release_prep.sh or set ENGLISHBUDDY_MODEL_SOURCE." >&2
+    exit 1
   fi
 
   local partial_path="${CACHE_MODEL_PATH}.download"
@@ -121,12 +140,18 @@ if ! ensure_expected_size "${source_model_path}"; then
   exit 1
 fi
 
-cached_checksum="$(read_metadata_value "${CACHE_METADATA_PATH}" checksum)"
-cached_size="$(read_metadata_value "${CACHE_METADATA_PATH}" expectedFileSizeBytes)"
+metadata_source_path="${CACHE_METADATA_PATH}"
+if [[ "${source_model_path}" == "${RELEASE_PREP_MODEL_PATH}" && -f "${RELEASE_PREP_METADATA_PATH}" ]]; then
+  metadata_source_path="${RELEASE_PREP_METADATA_PATH}"
+fi
+
+cached_checksum="$(read_metadata_value "${metadata_source_path}" checksum)"
+cached_size="$(read_metadata_value "${metadata_source_path}" expectedFileSizeBytes)"
 if [[ "${source_model_path}" != "${CACHE_MODEL_PATH}" || "${cached_size}" != "${EXPECTED_MODEL_SIZE}" || -z "${cached_checksum}" ]]; then
   echo "Calculating SHA256 for bundled model..." >&2
   cached_checksum="$(/usr/bin/shasum -a 256 "${source_model_path}" | awk '{print $1}')"
   write_metadata "${CACHE_METADATA_PATH}" "${cached_checksum}"
+  metadata_source_path="${CACHE_METADATA_PATH}"
 fi
 
 app_checksum="$(read_metadata_value "${APP_METADATA_PATH}" checksum)"

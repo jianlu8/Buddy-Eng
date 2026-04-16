@@ -1,299 +1,191 @@
-import AVFoundation
-import Speech
-import UIKit
+import Foundation
 
 @MainActor
-final class LiveSpeechPipeline: NSObject, SpeechPipelineProtocol {
+final class LiveSpeechPipeline: SpeechPipelineProtocol {
     var onPartialTranscript: (@MainActor (String) -> Void)?
     var onFinalTranscript: (@MainActor (String) -> Void)?
     var onVoiceActivity: (@MainActor (Double) -> Void)?
+    var onVoiceActivityStateChange: (@MainActor (VoiceActivityState) -> Void)?
+    var onRuntimeReadinessChange: (@MainActor (SpeechRuntimeReadiness) -> Void)?
     var onSpeechStateChange: (@MainActor (Bool) -> Void)?
+    var onSpeechEnvelope: (@MainActor (Double) -> Void)?
+    var onLipSyncFrame: (@MainActor (LipSyncFrame) -> Void)?
+    var onInterruptionReason: (@MainActor (SpeechInterruptionReason) -> Void)?
 
-    private let audioEngine = AVAudioEngine()
-    private let synthesizer = AVSpeechSynthesizer()
-    private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private var recognitionTask: SFSpeechRecognitionTask?
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var wantsListening = false
+    private let audioRuntime: DuplexAudioRuntime
+    private let speechAssetRegistry: BundledSpeechAssetRegistry
+    private let runtimeFactory: SpeechRuntimeFactory
+    private var asrRuntime: any ASRRuntimeProtocol
+    private var ttsRuntime: any TTSRuntimeProtocol
+    private let usesInjectedASRRuntime: Bool
+    private let usesInjectedTTSRuntime: Bool
+    private var currentASRDescriptor: SpeechRuntimeDescriptor?
+    private var currentTTSDescriptor: SpeechRuntimeDescriptor?
 
-    override init() {
-        super.init()
-        synthesizer.delegate = self
-        NotificationCenter.default.addObserver(self, selector: #selector(handleAudioInterruptionNotification(_:)), name: AVAudioSession.interruptionNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChangeNotification), name: AVAudioSession.routeChangeNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleDidEnterBackgroundNotification), name: UIApplication.didEnterBackgroundNotification, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(handleWillEnterForegroundNotification), name: UIApplication.willEnterForegroundNotification, object: nil)
+    init(
+        filesystem: AppFilesystem = AppFilesystem(),
+        audioRuntime: DuplexAudioRuntime = DuplexAudioRuntime(),
+        speechAssetRegistry: BundledSpeechAssetRegistry? = nil,
+        runtimeFactory: SpeechRuntimeFactory? = nil,
+        asrRuntime: (any ASRRuntimeProtocol)? = nil,
+        ttsRuntime: (any TTSRuntimeProtocol)? = nil
+    ) {
+        let resolvedSpeechAssetRegistry = speechAssetRegistry ?? BundledSpeechAssetRegistry(filesystem: filesystem)
+        let resolvedRuntimeFactory = runtimeFactory ?? SpeechRuntimeFactory(
+            audioRuntime: audioRuntime,
+            assetRegistry: resolvedSpeechAssetRegistry
+        )
+        let usesInjectedASRRuntime = asrRuntime != nil
+        let usesInjectedTTSRuntime = ttsRuntime != nil
+        self.audioRuntime = audioRuntime
+        self.speechAssetRegistry = resolvedSpeechAssetRegistry
+        self.runtimeFactory = resolvedRuntimeFactory
+        self.usesInjectedASRRuntime = usesInjectedASRRuntime
+        self.usesInjectedTTSRuntime = usesInjectedTTSRuntime
+        self.currentASRDescriptor = usesInjectedASRRuntime ? nil : SpeechRuntimeStatusSnapshot.fallbackDefault.asr
+        self.currentTTSDescriptor = usesInjectedTTSRuntime ? nil : SpeechRuntimeStatusSnapshot.fallbackDefault.tts
+        self.asrRuntime = asrRuntime ?? resolvedRuntimeFactory.makeASRRuntime()
+        self.ttsRuntime = ttsRuntime ?? resolvedRuntimeFactory.makeTTSRuntime()
+        wireASRRuntime()
+        wireTTSRuntime()
+        wireAudioRuntime()
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
+    func configureASR(localeIdentifier: String) {
+        refreshASRRuntimeIfNeeded(localeIdentifier: localeIdentifier)
+        asrRuntime.configureASR(localeIdentifier: localeIdentifier)
+    }
+
+    func prepareASR(localeIdentifier: String) async throws {
+        refreshASRRuntimeIfNeeded(localeIdentifier: localeIdentifier)
+        try await asrRuntime.prepareASR(localeIdentifier: localeIdentifier)
     }
 
     func evaluateSpeechCapability(requestPermissions: Bool) async -> SpeechCapabilityStatus {
-        let currentMicPermission = AVAudioApplication.shared.recordPermission
-        let currentSpeechPermission = SFSpeechRecognizer.authorizationStatus()
-
-        if requestPermissions, currentMicPermission == .undetermined {
-            _ = await AVAudioApplication.requestRecordPermission()
-        }
-
-        let speechAuthorization: SFSpeechRecognizerAuthorizationStatus
-        if requestPermissions, currentSpeechPermission == .notDetermined {
-            speechAuthorization = await Self.requestSpeechAuthorization()
-        } else {
-            speechAuthorization = currentSpeechPermission
-        }
-
-        let resolvedMicPermission = AVAudioApplication.shared.recordPermission
-        if resolvedMicPermission == .undetermined || speechAuthorization == .notDetermined {
-            return .permissionsRequired
-        }
-        if resolvedMicPermission != .granted || speechAuthorization != .authorized {
-            return .permissionsDenied
-        }
-        guard let speechRecognizer else {
-            return .onDeviceUnsupported
-        }
-        guard speechRecognizer.supportsOnDeviceRecognition else {
-            return .onDeviceUnsupported
-        }
-        guard speechRecognizer.isAvailable else {
-            return .temporarilyUnavailable
-        }
-        return .ready
+        await asrRuntime.evaluateSpeechCapability(requestPermissions: requestPermissions)
     }
 
     func startListening() async throws {
-        wantsListening = true
-
-        switch await evaluateSpeechCapability(requestPermissions: true) {
-        case .ready:
-            break
-        case .permissionsRequired, .permissionsDenied:
-            throw NSError(domain: "SpeechPipeline", code: 2, userInfo: [NSLocalizedDescriptionKey: "Speech recognition permission was denied."])
-        case .onDeviceUnsupported:
-            throw NSError(domain: "SpeechPipeline", code: 5, userInfo: [NSLocalizedDescriptionKey: "This device does not support on-device English speech recognition."])
-        case .temporarilyUnavailable:
-            throw NSError(domain: "SpeechPipeline", code: 4, userInfo: [NSLocalizedDescriptionKey: "Speech recognition is currently unavailable."])
-        }
-
-        guard let speechRecognizer else {
-            throw NSError(domain: "SpeechPipeline", code: 3, userInfo: [NSLocalizedDescriptionKey: "English on-device speech recognition is unavailable on this device."])
-        }
-
-        try configureAudioSession()
-        teardownRecognition()
-
-        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        recognitionRequest.shouldReportPartialResults = true
-        recognitionRequest.requiresOnDeviceRecognition = true
-        recognitionRequest.addsPunctuation = true
-        self.recognitionRequest = recognitionRequest
-
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(
-            onBus: 0,
-            bufferSize: 1024,
-            format: format,
-            block: Self.makeRecognitionTap(
-                request: recognitionRequest,
-                onVoiceActivity: onVoiceActivity
-            )
-        )
-
-        audioEngine.prepare()
-        try audioEngine.start()
-
-        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                Task { @MainActor in
-                    let transcript = result.bestTranscription.formattedString
-                    if result.isFinal {
-                        self.onFinalTranscript?(transcript)
-                    } else {
-                        self.onPartialTranscript?(transcript)
-                    }
-                }
-            }
-
-            if let error {
-                Task { @MainActor in
-                    self.recognitionRequest?.endAudio()
-                    let nsError = error as NSError
-                    guard self.wantsListening else { return }
-                    guard nsError.domain != "kAFAssistantErrorDomain" || nsError.code != 216 else { return }
-                    try? await self.restartListeningIfNeeded()
-                }
-            }
-        }
+        try await asrRuntime.startListening()
     }
 
     func stopListening() {
-        wantsListening = false
-        teardownRecognition()
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
-        onVoiceActivity?(0)
+        asrRuntime.stopListening()
+        audioRuntime.deactivateAudioSession()
     }
 
-    func speak(text: String, voiceStyle: VoiceStyle) async {
-        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false else { return }
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.rate = voiceStyle.rate
-        utterance.pitchMultiplier = voiceStyle.pitchMultiplier
-        utterance.voice = AVSpeechSynthesisVoice(language: voiceStyle.languageCode)
-        synthesizer.speak(utterance)
+    func suspendListening(reason: SpeechInterruptionReason) {
+        asrRuntime.suspendListening(reason: reason)
     }
 
-    func interruptSpeech() {
-        synthesizer.stopSpeaking(at: .immediate)
-        onSpeechStateChange?(false)
+    func recoverListeningIfNeeded() async throws {
+        try await asrRuntime.recoverListeningIfNeeded()
     }
 
-    nonisolated private static func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
-        await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
+    func configureTTS(voiceBundle: VoiceBundle) {
+        refreshTTSRuntimeIfNeeded(voiceBundle: voiceBundle)
+        ttsRuntime.configureTTS(voiceBundle: voiceBundle)
+    }
+
+    func prepareTTS(voiceBundle: VoiceBundle) async throws {
+        refreshTTSRuntimeIfNeeded(voiceBundle: voiceBundle)
+        try await ttsRuntime.prepareTTS(voiceBundle: voiceBundle)
+    }
+
+    func speak(chunks: [SpeechChunk], voiceStyle: VoiceStyle) async {
+        await ttsRuntime.speak(chunks: chunks, voiceStyle: voiceStyle)
+    }
+
+    func interruptSpeech(reason: SpeechInterruptionReason) {
+        ttsRuntime.interruptSpeech(reason: reason)
+        onInterruptionReason?(reason)
+    }
+
+    func prepareAudioSessionForCall() async throws {
+        try await audioRuntime.prepareAudioSessionForCall()
+    }
+
+    func recoverAudioAfterInterruption() async throws {
+        try await audioRuntime.recoverAudioAfterInterruption()
+        try await recoverListeningIfNeeded()
+    }
+
+    func deactivateAudioSession() {
+        audioRuntime.deactivateAudioSession()
+    }
+
+    func runtimeStatus(
+        conversationLanguage: LanguageProfile,
+        voiceBundle: VoiceBundle
+    ) -> SpeechRuntimeStatusSnapshot {
+        runtimeFactory.runtimeStatus(
+            conversationLanguage: conversationLanguage,
+            voiceBundle: voiceBundle
+        )
+    }
+
+    private func refreshASRRuntimeIfNeeded(localeIdentifier: String) {
+        guard usesInjectedASRRuntime == false else { return }
+        let descriptor = runtimeFactory.asrRuntimeDescriptor(localeIdentifier: localeIdentifier)
+        guard descriptor != currentASRDescriptor else { return }
+        currentASRDescriptor = descriptor
+        asrRuntime = runtimeFactory.makeASRRuntime(descriptor: descriptor)
+        wireASRRuntime()
+    }
+
+    private func refreshTTSRuntimeIfNeeded(voiceBundle: VoiceBundle) {
+        guard usesInjectedTTSRuntime == false else { return }
+        let descriptor = runtimeFactory.ttsRuntimeDescriptor(voiceBundle: voiceBundle)
+        guard descriptor != currentTTSDescriptor else { return }
+        currentTTSDescriptor = descriptor
+        ttsRuntime = runtimeFactory.makeTTSRuntime(descriptor: descriptor)
+        wireTTSRuntime()
+    }
+
+    private func wireASRRuntime() {
+        asrRuntime.onPartialTranscript = { [weak self] transcript in
+            self?.onPartialTranscript?(transcript)
+        }
+        asrRuntime.onFinalTranscript = { [weak self] transcript in
+            self?.onFinalTranscript?(transcript)
+        }
+        asrRuntime.onVoiceActivity = { [weak self] level in
+            self?.onVoiceActivity?(level)
+        }
+        asrRuntime.onVoiceActivityStateChange = { [weak self] state in
+            self?.onVoiceActivityStateChange?(state)
+        }
+        asrRuntime.onRuntimeReadinessChange = { [weak self] readiness in
+            self?.onRuntimeReadinessChange?(readiness)
         }
     }
 
-    nonisolated private static func makeRecognitionTap(
-        request: SFSpeechAudioBufferRecognitionRequest,
-        onVoiceActivity: (@MainActor (Double) -> Void)?
-    ) -> AVAudioNodeTapBlock {
-        { buffer, _ in
-            let audioBuffer = buffer.audioBufferList.pointee.mBuffers
-            guard buffer.frameLength > 0, audioBuffer.mDataByteSize > 0 else { return }
-            request.append(buffer)
-
-            guard let onVoiceActivity else { return }
-            let level = Self.computeLevel(for: buffer)
-            Task { @MainActor in
-                onVoiceActivity(level)
-            }
+    private func wireTTSRuntime() {
+        ttsRuntime.onSpeechStateChange = { [weak self] speaking in
+            self?.onSpeechStateChange?(speaking)
+        }
+        ttsRuntime.onSpeechEnvelope = { [weak self] envelope in
+            self?.onSpeechEnvelope?(envelope)
+        }
+        ttsRuntime.onLipSyncFrame = { [weak self] frame in
+            self?.onLipSyncFrame?(frame)
         }
     }
 
-    private func configureAudioSession() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
-        try session.setActive(true, options: [.notifyOthersOnDeactivation])
-    }
-
-    private func teardownRecognition() {
-        if audioEngine.isRunning {
-            audioEngine.stop()
+    private func wireAudioRuntime() {
+        audioRuntime.onInterruptionReason = { [weak self] reason in
+            self?.onInterruptionReason?(reason)
         }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
-        recognitionTask?.cancel()
-        recognitionTask = nil
-        recognitionRequest = nil
-    }
-
-    private func restartListeningIfNeeded() async throws {
-        guard wantsListening else { return }
-        teardownRecognition()
-        try await startListening()
-    }
-
-    @objc nonisolated private func handleAudioInterruptionNotification(_ notification: Notification) {
-        let rawValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-        Task { @MainActor [weak self] in
-            self?.handleAudioInterruption(typeRawValue: rawValue)
+        audioRuntime.onListeningSuspended = { [weak self] reason in
+            guard let self else { return }
+            self.asrRuntime.suspendListening(reason: reason)
+            self.ttsRuntime.interruptSpeech(reason: reason)
+            self.onVoiceActivity?(0)
+            self.onInterruptionReason?(reason)
         }
-    }
-
-    @objc nonisolated private func handleRouteChangeNotification() {
-        Task { @MainActor [weak self] in
-            self?.handleRouteChange()
-        }
-    }
-
-    @objc nonisolated private func handleDidEnterBackgroundNotification() {
-        Task { @MainActor [weak self] in
-            self?.handleDidEnterBackground()
-        }
-    }
-
-    @objc nonisolated private func handleWillEnterForegroundNotification() {
-        Task { @MainActor [weak self] in
-            self?.handleWillEnterForeground()
-        }
-    }
-
-    private func handleAudioInterruption(typeRawValue: UInt?) {
-        guard let rawValue = typeRawValue,
-              let type = AVAudioSession.InterruptionType(rawValue: rawValue) else {
-            return
-        }
-
-        switch type {
-        case .began:
-            teardownRecognition()
-            onVoiceActivity?(0)
-        case .ended:
-            guard wantsListening else { return }
-            Task { @MainActor in
-                try? await restartListeningIfNeeded()
-            }
-        @unknown default:
-            break
-        }
-    }
-
-    private func handleRouteChange() {
-        guard wantsListening else { return }
-        Task { @MainActor in
-            try? configureAudioSession()
-        }
-    }
-
-    private func handleDidEnterBackground() {
-        guard wantsListening else { return }
-        teardownRecognition()
-    }
-
-    private func handleWillEnterForeground() {
-        guard wantsListening else { return }
-        Task { @MainActor in
-            try? await restartListeningIfNeeded()
-        }
-    }
-
-    nonisolated private static func computeLevel(for buffer: AVAudioPCMBuffer) -> Double {
-        guard let data = buffer.floatChannelData?[0] else { return 0 }
-        let count = Int(buffer.frameLength)
-        guard count > 0 else { return 0 }
-
-        var sum: Float = 0
-        for index in 0..<count {
-            sum += data[index] * data[index]
-        }
-        let rms = sqrt(sum / Float(count))
-        return min(max(Double(rms * 10), 0), 1)
-    }
-}
-
-extension LiveSpeechPipeline: AVSpeechSynthesizerDelegate {
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
-        Task { @MainActor [weak self] in
-            self?.onSpeechStateChange?(true)
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor [weak self] in
-            self?.onSpeechStateChange?(false)
-        }
-    }
-
-    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor [weak self] in
-            self?.onSpeechStateChange?(false)
+        audioRuntime.onRecoveryRequested = { [weak self] in
+            guard let self else { return }
+            try? await self.recoverAudioAfterInterruption()
         }
     }
 }
