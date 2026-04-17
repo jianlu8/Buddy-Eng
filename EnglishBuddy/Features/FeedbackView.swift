@@ -42,7 +42,7 @@ struct FeedbackView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground()
+                AppCanvasBackground(style: .feedback)
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 18) {
@@ -339,11 +339,7 @@ private struct FeedbackActionButton: View {
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(Color(red: 0.51, green: 0.46, blue: 0.42))
             }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
-            )
+            .surfaceCard(padding: 14, fill: AppTheme.canvasLift, shadowOpacity: 0.04)
         }
         .buttonStyle(.plain)
     }
@@ -357,17 +353,17 @@ private struct DashboardRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .foregroundStyle(Color(red: 0.28, green: 0.25, blue: 0.31))
+                .foregroundStyle(AppTheme.mutedInk)
             Text(content)
                 .font(.system(.body, design: .rounded))
-                .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                .foregroundStyle(AppTheme.ink)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+                .fill(AppTheme.canvasLift)
         )
     }
 

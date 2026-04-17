@@ -87,7 +87,7 @@ struct HistoryView: View {
 
     var body: some View {
         ZStack {
-            AppCanvasBackground()
+            AppCanvasBackground(style: .history)
 
             if threads.isEmpty {
                 ContentUnavailableView(
@@ -135,7 +135,7 @@ struct HistoryView: View {
         let completedTutor = threads.filter { $0.latestSession.mode == .tutor }.count
 
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Threads stay on device, so each character keeps its latest scene, mission, and continuation cue ready to resume.")
+            Text("All threads stay on device, so each companion keeps the latest mission, cue, and scene ready to resume.")
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(.white)
 
@@ -290,12 +290,12 @@ private struct ThreadHistoryCard: View {
             HStack(spacing: 10) {
                 Button("Review Thread", action: openAction)
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                    .foregroundStyle(AppTheme.ink)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color(red: 0.97, green: 0.95, blue: 0.92))
+                            .fill(AppTheme.canvasLift)
                     )
 
                 Button(action: continueAction) {
@@ -315,15 +315,7 @@ private struct ThreadHistoryCard: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color.white.opacity(0.94))
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(Color.black.opacity(0.05), lineWidth: 1)
-        }
+        .surfaceCard()
     }
 
     private var durationText: String {
@@ -345,7 +337,7 @@ private struct ThreadDetailView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground()
+                AppCanvasBackground(style: .history)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -414,8 +406,11 @@ private struct ThreadDetailView: View {
                         )
 
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Sessions in this thread")
-                                .font(.system(.title3, design: .rounded, weight: .bold))
+                            AppSectionHeader(
+                                eyebrow: "Timeline",
+                                title: "Sessions in this thread",
+                                subtitle: "Open any saved turn to review the local transcript and continue from that moment."
+                            )
 
                             ForEach(thread.sessions) { session in
                                 Button {
@@ -507,7 +502,7 @@ private struct SessionDetailView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground()
+                AppCanvasBackground(style: .history)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -701,19 +696,7 @@ private struct DetailBadge: View {
     let text: String
 
     var body: some View {
-        Text(text)
-            .font(.system(.caption, design: .rounded, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                Capsule()
-                    .fill(Color.black.opacity(0.24))
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                    )
-            )
+        AppCapsuleBadge(text: text, tint: Color.white, foreground: .white, backgroundOpacity: 0.12)
     }
 }
 
@@ -744,14 +727,6 @@ private struct DetailRow: View {
 
 private extension View {
     func detailPanel() -> some View {
-        padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(Color.white.opacity(0.94))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
-            }
+        surfaceCard()
     }
 }
