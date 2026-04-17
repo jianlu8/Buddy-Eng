@@ -500,20 +500,15 @@ private struct CallBottomControls: View {
     @Binding var subtitleMode: SubtitleOverlayMode
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
+    @State private var showingComposer = false
     @State private var focusRequestedAt: Date?
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 12) {
-            HStack {
-                Text("Can't speak now? Type instead.")
-                    .font(.system(.caption, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.74))
-                Spacer()
+            if showingComposer {
+                inlineComposer
             }
-            .padding(.horizontal, 6)
-
-            inlineComposer
 
             HStack(spacing: 12) {
                 Button {
@@ -521,18 +516,35 @@ private struct CallBottomControls: View {
                         subtitleMode = subtitleMode == .collapsed ? .expanded : .collapsed
                     }
                 } label: {
-                    Label(
-                        subtitleMode == .collapsed ? "Expand Captions" : "Collapse Captions",
-                        systemImage: subtitleMode == .collapsed ? "captions.bubble" : "captions.bubble.fill"
+                    CallControlButton(
+                        title: "Captions",
+                        systemImage: subtitleMode == .collapsed ? "captions.bubble" : "captions.bubble.fill",
+                        isActive: subtitleMode != .collapsed
                     )
-                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
 
-                Spacer(minLength: 0)
+                Button {
+                    let shouldShowComposer = showingComposer == false
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                        showingComposer = shouldShowComposer
+                    }
+                    if shouldShowComposer {
+                        focusRequestedAt = .now
+                        isTextFieldFocused = true
+                    } else {
+                        isTextFieldFocused = false
+                    }
+                } label: {
+                    CallControlButton(
+                        title: showingComposer ? "Hide" : "Text",
+                        systemImage: showingComposer ? "keyboard.chevron.compact.down" : "keyboard",
+                        isActive: showingComposer
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
 
                 Button {
                     Task {
@@ -544,9 +556,11 @@ private struct CallBottomControls: View {
                         Image(systemName: "phone.down.fill")
                         Text("End")
                     }
-                    .font(.system(.headline, design: .rounded, weight: .bold))
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.84)
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .background(
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -557,8 +571,14 @@ private struct CallBottomControls: View {
             }
             .floatingDock()
         }
+        .onChange(of: showingComposer) { _, isPresented in
+            textInputActive = isPresented || isTextFieldFocused
+            if isPresented == false {
+                isTextFieldFocused = false
+            }
+        }
         .onChange(of: isTextFieldFocused) { _, isFocused in
-            textInputActive = isFocused
+            textInputActive = isFocused || showingComposer
             guard isFocused, let requestedAt = focusRequestedAt else { return }
             let elapsed = max(0, Int(Date().timeIntervalSince(requestedAt) * 1000))
             orchestrator.recordKeyboardOpenLatency(milliseconds: elapsed)
@@ -570,32 +590,60 @@ private struct CallBottomControls: View {
     }
 
     private var inlineComposer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Can't speak now? Type here", text: $draft, axis: .vertical)
-                .focused($isTextFieldFocused)
-                .font(.system(.body, design: .rounded))
-                .foregroundStyle(.white)
-                .tint(AppTheme.warmAccentSoft)
-                .lineLimit(1...4)
-                .submitLabel(.send)
-                .onSubmit(sendDraft)
-                .onTapGesture {
-                    if isTextFieldFocused == false {
-                        focusRequestedAt = .now
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Text fallback")
+                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.70))
+                    Text("Can't speak now? Send one line and keep the call moving.")
+                        .font(.system(.footnote, design: .rounded, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.86))
                 }
 
-            Button(action: sendDraft) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(
-                        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                            ? Color.white.opacity(0.28)
-                            : Color(red: 1.0, green: 0.78, blue: 0.58)
-                    )
+                Spacer()
+
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                        showingComposer = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.82))
+                        .frame(width: 28, height: 28)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Type a short message", text: $draft, axis: .vertical)
+                    .focused($isTextFieldFocused)
+                    .font(.system(.body, design: .rounded))
+                    .foregroundStyle(.white)
+                    .tint(AppTheme.warmAccentSoft)
+                    .lineLimit(1...4)
+                    .submitLabel(.send)
+                    .onSubmit(sendDraft)
+                    .onTapGesture {
+                        if isTextFieldFocused == false {
+                            focusRequestedAt = .now
+                        }
+                    }
+
+                Button(action: sendDraft) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 28, weight: .semibold))
+                        .foregroundStyle(
+                            draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? Color.white.opacity(0.28)
+                                : Color(red: 1.0, green: 0.78, blue: 0.58)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
         .glassPanel(padding: 16, tint: Color.black.opacity(0.32), strokeOpacity: 0.12)
     }
@@ -604,9 +652,40 @@ private struct CallBottomControls: View {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         draft = ""
+        showingComposer = false
+        isTextFieldFocused = false
         Task {
             await orchestrator.sendTextFallback(trimmed)
         }
+    }
+}
+
+@MainActor
+private struct CallControlButton: View {
+    let title: String
+    let systemImage: String
+    let isActive: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+            Text(title)
+                .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.84)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            Capsule(style: .continuous)
+                .fill(isActive ? Color.white.opacity(0.16) : Color.white.opacity(0.08))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(isActive ? 0.16 : 0.08), lineWidth: 1)
+                )
+        )
     }
 }
 
