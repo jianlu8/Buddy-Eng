@@ -89,6 +89,22 @@ final class ConversationOrchestratorTests: XCTestCase {
         XCTAssertNil(chunker.flushRemaining())
     }
 
+    func testSpeechChunkerAdaptivePolicyDoesNotFlushOnWeakTrailingPhrase() {
+        var chunker = ConversationOrchestrator.SpeechChunker(policy: .adaptive)
+
+        XCTAssertNil(chunker.append("I can help you practice your English and answer your questions"))
+        XCTAssertNil(chunker.append(" or just have a"))
+
+        let chunk = chunker.append(" casual conversation!")
+
+        XCTAssertEqual(
+            chunk?.text,
+            "I can help you practice your English and answer your questions or just have a casual conversation!"
+        )
+        XCTAssertEqual(chunk?.isFinal, false)
+        XCTAssertNil(chunker.flushRemaining())
+    }
+
     func testFallbackTextCreatesAssistantTurnUsingSelectedModel() async throws {
         let engine = MockInferenceEngine()
         let speech = MockSpeechPipeline()

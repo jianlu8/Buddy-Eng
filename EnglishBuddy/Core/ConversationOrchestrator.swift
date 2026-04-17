@@ -6,6 +6,11 @@ final class ConversationOrchestrator: ObservableObject {
     struct SpeechChunker {
         private(set) var policy: SpeechChunkingPolicy
         private var buffer = ""
+        private static let weakTrailingWords: Set<String> = [
+            "a", "an", "the",
+            "and", "or", "but",
+            "to", "of", "for", "with", "in", "on", "at", "by", "from"
+        ]
 
         init(policy: SpeechChunkingPolicy = .adaptive) {
             self.policy = policy
@@ -55,26 +60,41 @@ final class ConversationOrchestrator: ObservableObject {
                 || latestToken.contains(";")
                 || latestToken.contains(":")
             let wordCount = trimmedBuffer.split(whereSeparator: \.isWhitespace).count
+            let hasWeakTrailingPhrase = endsWithWeakTrailingPhrase(trimmedBuffer)
 
             switch policy {
             case .sentence:
-                return endedSentence || trimmedBuffer.count >= 120
+                if endedSentence {
+                    return true
+                }
+                if trimmedBuffer.count >= 120 {
+                    return hasWeakTrailingPhrase == false
+                }
+                return false
             case .phrase:
                 if endedSentence {
                     return true
                 }
                 if hitPhraseBoundary && (trimmedBuffer.count >= 14 || wordCount >= 3) {
+                    guard hasWeakTrailingPhrase == false else { return false }
                     return true
                 }
-                return trimmedBuffer.count >= 64
+                if trimmedBuffer.count >= 64 {
+                    return hasWeakTrailingPhrase == false
+                }
+                return false
             case .adaptive:
                 if endedSentence {
                     return true
                 }
                 if hitPhraseBoundary && (trimmedBuffer.count >= 28 || wordCount >= 6) {
+                    guard hasWeakTrailingPhrase == false else { return false }
                     return true
                 }
-                return trimmedBuffer.count >= 72
+                if trimmedBuffer.count >= 72 {
+                    return hasWeakTrailingPhrase == false
+                }
+                return false
             }
         }
 
@@ -83,6 +103,23 @@ final class ConversationOrchestrator: ObservableObject {
             guard ",.;:!?)]}".contains(right) == false else { return false }
             guard "([{".contains(left) == false else { return false }
             return true
+        }
+
+        private func endsWithWeakTrailingPhrase(_ text: String) -> Bool {
+            let tokens = text.lowercased().split(whereSeparator: \.isWhitespace)
+            guard let last = tokens.last else { return false }
+
+            let sanitizedLast = String(last).trimmingCharacters(in: CharacterSet.punctuationCharacters)
+            guard Self.weakTrailingWords.contains(sanitizedLast) else { return false }
+
+            if tokens.count == 1 {
+                return true
+            }
+
+            let recentTokens = tokens.suffix(4).map {
+                String($0).trimmingCharacters(in: CharacterSet.punctuationCharacters)
+            }
+            return recentTokens.contains(where: { Self.weakTrailingWords.contains($0) })
         }
     }
 
