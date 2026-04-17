@@ -114,6 +114,16 @@ final class ConversationOrchestratorTests: XCTestCase {
         await sendTask.value
     }
 
+    func testPreparedCallQueuesTTSWarmupForSelectedVoice() async throws {
+        let speech = MockSpeechPipeline()
+        let harness = try await makeHarness(engine: MockInferenceEngine(), speech: speech)
+        _ = harness.orchestrator
+
+        await waitUntil { speech.prepareTTSCount == 1 }
+
+        XCTAssertEqual(speech.prepareTTSCount, 1)
+    }
+
     func testEndCallCancelsActiveResponseAndIgnoresLateTokens() async throws {
         let engine = ControlledInferenceEngine()
         let speech = MockSpeechPipeline()
@@ -291,6 +301,10 @@ final class ConversationOrchestratorTests: XCTestCase {
             scenarioID: scenarioID,
             learningPlanSnapshot: learningPlan
         )
+        let voiceBundle = VoiceCatalog.defaultBundle(
+            for: CharacterCatalog.flagship.id,
+            languageID: LanguageCatalog.english.id
+        )
         try await memoryStore.upsertSession(session)
         orchestrator.beginPreparedCall(
             PreparedCallLaunch(
@@ -298,6 +312,7 @@ final class ConversationOrchestratorTests: XCTestCase {
                 session: session,
                 inputMode: .liveVoice,
                 openingInstruction: "Say hello.",
+                voiceBundle: voiceBundle,
                 voiceStyle: .default,
                 speechChunkingPolicy: speechChunkingPolicy
             )
@@ -394,6 +409,7 @@ private final class MockSpeechPipeline: SpeechPipelineProtocol {
     private(set) var spokenChunks: [SpeechChunk] = []
     private(set) var stopListeningCount = 0
     private(set) var interruptSpeechCount = 0
+    private(set) var prepareTTSCount = 0
 
     func prepareAudioSessionForCall() async throws {}
     func recoverAudioAfterInterruption() async throws {}
@@ -401,7 +417,7 @@ private final class MockSpeechPipeline: SpeechPipelineProtocol {
     func configureASR(localeIdentifier: String) {}
     func prepareASR(localeIdentifier: String) async throws {}
     func configureTTS(voiceBundle: VoiceBundle) {}
-    func prepareTTS(voiceBundle: VoiceBundle) async throws {}
+    func prepareTTS(voiceBundle: VoiceBundle) async throws { prepareTTSCount += 1 }
     func evaluateSpeechCapability(requestPermissions: Bool) async -> SpeechCapabilityStatus { .ready }
     func runtimeStatus(
         conversationLanguage: LanguageProfile,

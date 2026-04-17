@@ -98,6 +98,7 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
     private var currentLipSyncIndex = 0
     private var currentFormatKey: String?
     private var activePlaybackContinuation: CheckedContinuation<Void, Error>?
+    private var warmedVoiceConfigurationKey: String?
 
     init(
         descriptor: SpeechRuntimeDescriptor,
@@ -117,8 +118,12 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         guard let preparation = resolvePreparation() else {
             throw NSError(domain: "SpeechPipeline", code: 2301, userInfo: [NSLocalizedDescriptionKey: missingAssetMessage])
         }
-        try await worker.prepare(preparation)
-        preparedConfigurationKey = preparation.cacheKey
+        if preparedConfigurationKey != preparation.cacheKey {
+            try await worker.prepare(preparation)
+            preparedConfigurationKey = preparation.cacheKey
+            warmedVoiceConfigurationKey = nil
+        }
+        try await warmVoiceIfNeeded(voiceBundle: voiceBundle)
     }
 
     func speak(chunks: [SpeechChunk], voiceStyle: VoiceStyle) async {
@@ -420,6 +425,28 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         return min(max(silenceScale, 0.08), 0.30)
     }
 
+    private func warmVoiceIfNeeded(voiceBundle: VoiceBundle) async throws {
+        guard voiceBundle.prewarmRequired else { return }
+        guard let preparedConfigurationKey else { return }
+
+        let warmupKey = [
+            preparedConfigurationKey,
+            voiceBundle.id,
+            String(voiceBundle.runtimeSpeakerID)
+        ].joined(separator: "|")
+        guard warmedVoiceConfigurationKey != warmupKey else { return }
+
+        let warmupText = Self.warmupText(for: voiceBundle)
+        _ = try await worker.generateClip(
+            text: warmupText,
+            options: synthesisOptions(
+                for: warmupText,
+                voiceStyle: Self.warmupVoiceStyle(for: voiceBundle)
+            )
+        )
+        warmedVoiceConfigurationKey = warmupKey
+    }
+
     private func resolveLexiconPath(assetURL: URL) -> String? {
         let fileName: String
         switch configuredVoiceBundle.pronunciationLexiconID {
@@ -484,5 +511,25 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         }
 
         return frames
+    }
+
+    nonisolated private static func warmupText(for voiceBundle: VoiceBundle) -> String {
+        switch voiceBundle.accent {
+        case .british:
+            return "Ready to begin."
+        case .american:
+            return "Ready to begin."
+        }
+    }
+
+    nonisolated private static func warmupVoiceStyle(for voiceBundle: VoiceBundle) -> VoiceStyle {
+        VoiceStyle(
+            rate: 0.47,
+            pitchMultiplier: voiceBundle.pitchMultiplier,
+            languageCode: voiceBundle.languageCode,
+            voiceIdentifier: voiceBundle.voiceIdentifier,
+            prosodyPolicy: voiceBundle.prosodyPolicy,
+            accent: voiceBundle.accent
+        )
     }
 }

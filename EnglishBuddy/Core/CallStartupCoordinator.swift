@@ -14,6 +14,7 @@ struct PreparedCallLaunch {
     var session: ConversationSession
     var inputMode: CallInputMode
     var openingInstruction: String
+    var voiceBundle: VoiceBundle
     var voiceStyle: VoiceStyle
     var speechChunkingPolicy: SpeechChunkingPolicy
     var conversationPreface: ConversationPreface = ConversationPreface(systemPrompt: "", starterMessages: [])
@@ -331,6 +332,7 @@ final class CallStartupCoordinator {
                     session: session,
                     inputMode: inputMode,
                     openingInstruction: openingInstruction,
+                    voiceBundle: voiceBundle,
                     voiceStyle: VoiceStyle(
                         rate: max(0.35, min(snapshot.companionSettings.speechRate * voiceBundle.rateMultiplier * (mode == .tutor ? 0.94 : 1.0), 0.62)),
                         pitchMultiplier: voiceBundle.pitchMultiplier * (mode == .chat ? 1.0 : 0.98),

@@ -301,6 +301,13 @@ struct SettingsView: View {
             guard isEditingSpeechRate == false else { return }
             draftSpeechRate = Double(newValue)
         }
+        .task(id: "\(settings.selectedCharacterID)|\(conversationLanguage.id)|\(settings.selectedVoiceBundleID)") {
+            container.prewarmSpeechRuntimeIfNeeded(
+                characterID: settings.selectedCharacterID,
+                languageID: conversationLanguage.id,
+                voiceBundleID: settings.selectedVoiceBundleID
+            )
+        }
     }
 
     private func binding<Value: Equatable & Sendable>(

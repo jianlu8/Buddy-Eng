@@ -121,6 +121,7 @@ final class ConversationOrchestrator: ObservableObject {
     private var lastAssistantTranscriptCommitAt: Date = .distantPast
     private var pendingConversationActivation: ConversationActivationRequest?
     private var conversationActivationTask: Task<Void, Error>?
+    private var ttsWarmupTask: Task<Void, Never>?
 
     init(
         inferenceEngine: InferenceEngineProtocol,
@@ -181,6 +182,7 @@ final class ConversationOrchestrator: ObservableObject {
         setLipSyncFrame(.neutral)
         subtitleOverlayState = SubtitleOverlayState()
         lastSpeechInterruption = nil
+        queueTTSWarmupIfNeeded(for: preparedCall.voiceBundle)
     }
 
     func activateLiveAudioIfNeeded() async {
@@ -240,6 +242,8 @@ final class ConversationOrchestrator: ObservableObject {
     func failPreparedCall(message: String) {
         conversationActivationTask?.cancel()
         conversationActivationTask = nil
+        ttsWarmupTask?.cancel()
+        ttsWarmupTask = nil
         pendingConversationActivation = nil
         speechPipeline.stopListening()
         speechPipeline.interruptSpeech(reason: .runtimeReset)
@@ -269,6 +273,8 @@ final class ConversationOrchestrator: ObservableObject {
         setIsCallActive(false)
         conversationActivationTask?.cancel()
         conversationActivationTask = nil
+        ttsWarmupTask?.cancel()
+        ttsWarmupTask = nil
         pendingConversationActivation = nil
         activeResponseSessionID = nil
         pendingUserTranscripts = []
@@ -557,15 +563,39 @@ final class ConversationOrchestrator: ObservableObject {
 
     private func flushSpeechIfNeeded(using latestToken: String) {
         guard let chunk = speechChunker.append(latestToken) else { return }
-        Task {
-            await speechPipeline.speak(chunks: [chunk], voiceStyle: currentVoiceStyle)
-        }
+        speakPreparedChunks([chunk])
     }
 
     private func flushRemainingSpeech() {
         guard let chunk = speechChunker.flushRemaining() else { return }
-        Task {
-            await speechPipeline.speak(chunks: [chunk], voiceStyle: currentVoiceStyle)
+        speakPreparedChunks([chunk])
+    }
+
+    private func queueTTSWarmupIfNeeded(for voiceBundle: VoiceBundle) {
+        ttsWarmupTask?.cancel()
+        guard voiceBundle.prewarmRequired else {
+            ttsWarmupTask = nil
+            return
+        }
+
+        ttsWarmupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.speechPipeline.prepareTTS(voiceBundle: voiceBundle)
+                StartupTrace.mark("ConversationOrchestrator.queueTTSWarmupIfNeeded.ready voice=\(voiceBundle.id)")
+            } catch {
+                StartupTrace.mark("ConversationOrchestrator.queueTTSWarmupIfNeeded.failed voice=\(voiceBundle.id) message=\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func speakPreparedChunks(_ chunks: [SpeechChunk]) {
+        let voiceStyle = currentVoiceStyle
+        let warmupTask = ttsWarmupTask
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await warmupTask?.value
+            await self.speechPipeline.speak(chunks: chunks, voiceStyle: voiceStyle)
         }
     }
 

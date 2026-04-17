@@ -48,6 +48,7 @@ struct PersonalizationSheet: View {
                         characterPicker
                         scenePicker
                         visualStylePicker
+                        languageSupportPanel
                         saveButton
                         secondarySetupPanel
                     }
@@ -75,6 +76,13 @@ struct PersonalizationSheet: View {
                 explanationLanguageID = snapshot.companionSettings.explanationLanguageID
                 selectedVisualStyle = snapshot.companionSettings.visualStyle
                 loadedInitialState = true
+            }
+            .task(id: "\(selectedCharacterID)|\(conversationLanguageID)|\(selectedVoiceBundleID)") {
+                container.prewarmSpeechRuntimeIfNeeded(
+                    characterID: selectedCharacterID,
+                    languageID: conversationLanguageID,
+                    voiceBundleID: selectedVoiceBundleID
+                )
             }
         }
     }
@@ -360,7 +368,6 @@ struct PersonalizationSheet: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 18) {
                 profileForm
-                languageSupportPanel
                 modePicker
                 portraitCharacterPanel
             }
@@ -370,7 +377,7 @@ struct PersonalizationSheet: View {
                 Text("More Options")
                     .font(.system(.title3, design: .rounded, weight: .bold))
                     .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.20))
-                Text("Name, goal, language, default mode, and photo character status stay here so the first setup stays lightweight.")
+                Text("Name, goal, default mode, and photo character status stay here so the first setup stays lightweight.")
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(.secondary)
             }
