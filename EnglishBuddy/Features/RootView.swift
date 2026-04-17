@@ -258,15 +258,24 @@ private struct FatalConfigurationView: View {
 }
 
 struct AppCanvasBackground: View {
+    var style: AppBackgroundStyle = .home
+
     var body: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.97, green: 0.95, blue: 0.90),
-                Color(red: 1.0, green: 0.98, blue: 0.95)
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
+        ZStack {
+            AppTheme.backgroundGradient(for: style)
+
+            Circle()
+                .fill(AppTheme.warmAccentSoft.opacity(0.16))
+                .frame(width: 320, height: 320)
+                .blur(radius: 24)
+                .offset(x: 150, y: -260)
+
+            Circle()
+                .fill(AppTheme.coolAccent.opacity(0.08))
+                .frame(width: 280, height: 280)
+                .blur(radius: 38)
+                .offset(x: -170, y: 280)
+        }
         .ignoresSafeArea()
     }
 }

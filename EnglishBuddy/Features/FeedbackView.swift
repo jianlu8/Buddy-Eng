@@ -488,14 +488,6 @@ private struct FlexibleRow<Data: RandomAccessCollection, Content: View>: View wh
 
 private extension View {
     func panelStyle() -> some View {
-        padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(Color.white.opacity(0.94))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
-            }
+        surfaceCard()
     }
 }
