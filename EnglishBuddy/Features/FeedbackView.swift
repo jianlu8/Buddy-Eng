@@ -47,6 +47,7 @@ struct FeedbackView: View {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         heroSummary
+                        feedbackMetricsStrip
                         missionDashboard
                         correctionBoard
                         languageCarryOver
@@ -157,10 +158,33 @@ struct FeedbackView: View {
         )
     }
 
+    private var feedbackMetricsStrip: some View {
+        HStack(spacing: 10) {
+            FeedbackQuickMetric(
+                title: "Grammar",
+                value: "\(report.grammarIssues.count)",
+                tint: Color(red: 0.30, green: 0.47, blue: 0.79)
+            )
+            FeedbackQuickMetric(
+                title: "Vocabulary",
+                value: "\(report.carryOverVocabulary.count + report.vocabularySuggestions.count)",
+                tint: Color(red: 0.88, green: 0.53, blue: 0.21)
+            )
+            FeedbackQuickMetric(
+                title: "Pronunciation",
+                value: "\(report.pronunciationTips.count + report.pronunciationHighlights.count)",
+                tint: Color(red: 0.24, green: 0.53, blue: 0.41)
+            )
+        }
+    }
+
     private var missionDashboard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Mission Dashboard")
-                .font(.system(.title3, design: .rounded, weight: .bold))
+            AppSectionHeader(
+                eyebrow: "Mission recap",
+                title: "What this session pushed forward",
+                subtitle: "Keep one clear objective, checkpoint, and success signal visible before you revisit the detailed notes."
+            )
 
             if let learningPlan {
                 DashboardRow(title: learningPlan.title, content: learningPlan.mission)
@@ -183,8 +207,11 @@ struct FeedbackView: View {
 
     private var correctionBoard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Call Notes")
-                .font(.system(.title3, design: .rounded, weight: .bold))
+            AppSectionHeader(
+                eyebrow: "Coach notes",
+                title: "Corrections worth revisiting",
+                subtitle: "This stays closer to a debrief than a dashboard: just the fixes and explanations that matter for the next call."
+            )
 
             CorrectionGroup(title: "Grammar", items: report.grammarIssues, tint: Color.blue)
             CorrectionGroup(title: "Vocabulary", items: report.vocabularySuggestions, tint: Color.orange)
@@ -195,8 +222,11 @@ struct FeedbackView: View {
 
     private var languageCarryOver: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Carry Forward")
-                .font(.system(.title3, design: .rounded, weight: .bold))
+            AppSectionHeader(
+                eyebrow: "Carry forward",
+                title: "What to keep in your mouth",
+                subtitle: "Save expressions and vocabulary that should survive into the next live call."
+            )
 
             DashboardRow(
                 title: mode == .tutor ? "Reusable Expressions" : "Smooth Phrases",
@@ -216,10 +246,27 @@ struct FeedbackView: View {
 
     private var nextCallBoard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Next Call")
-                .font(.system(.title3, design: .rounded, weight: .bold))
+            AppSectionHeader(
+                eyebrow: "Next move",
+                title: "Open the next call with intention",
+                subtitle: "The next mission should feel concrete enough to start immediately, not like a generic recommendation."
+            )
 
-            DashboardRow(title: "Recommended next mission", content: report.nextMission)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Recommended next mission")
+                    .font(.system(.subheadline, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.33, green: 0.23, blue: 0.20))
+                Text(report.nextMission)
+                    .font(.system(.body, design: .rounded, weight: .semibold))
+                    .foregroundStyle(AppTheme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(red: 0.99, green: 0.92, blue: 0.86))
+            )
 
             if report.nextThemeSuggestion.isEmpty == false {
                 DashboardRow(title: "Next theme suggestion", content: report.nextThemeSuggestion)
@@ -241,8 +288,11 @@ struct FeedbackView: View {
 
     private var actionPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Launch Next Step")
-                .font(.system(.title3, design: .rounded, weight: .bold))
+            AppSectionHeader(
+                eyebrow: "Launch next step",
+                title: "Stay in motion",
+                subtitle: "Jump straight back into the same relationship, roll into the next mission, or branch into a nearby theme."
+            )
 
             if let continueThreadAction {
                 FeedbackActionButton(
@@ -342,6 +392,33 @@ private struct FeedbackActionButton: View {
             .surfaceCard(padding: 14, fill: AppTheme.canvasLift, shadowOpacity: 0.04)
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct FeedbackQuickMetric: View {
+    let title: String
+    let value: String
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(value)
+                .font(.system(.title3, design: .rounded, weight: .black))
+                .foregroundStyle(AppTheme.ink)
+            Text(title)
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+                .foregroundStyle(AppTheme.mutedInk)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.white.opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(tint.opacity(0.22), lineWidth: 1)
+                )
+        )
     }
 }
 

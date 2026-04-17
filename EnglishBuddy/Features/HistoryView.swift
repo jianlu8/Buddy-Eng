@@ -52,6 +52,10 @@ private struct ConversationThreadSummary: Identifiable {
     var continuationCue: String? {
         threadState?.continuationCue
     }
+
+    var summaryLead: String {
+        "\(language.displayName) thread • \(sessions.count) local sessions"
+    }
 }
 
 struct HistoryView: View {
@@ -210,26 +214,67 @@ private struct ThreadHistoryCard: View {
     let openAction: () -> Void
     let continueAction: () -> Void
 
+    private var preview: some View {
+        CharacterStageSurface(
+            character: thread.character,
+            scene: thread.scene,
+            visualStyle: .natural,
+            emphasis: .preview,
+            surfaceKind: .historyPreview,
+            size: CGSize(width: 92, height: 118),
+            isAnimated: false,
+            showsBackdrop: false,
+            groundShadowWidth: 64,
+            groundShadowHeight: 10,
+            groundShadowBlur: 7
+        )
+        .frame(width: 92, height: 118)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.93, green: 0.93, blue: 0.96),
+                            Color(red: 0.98, green: 0.95, blue: 0.91)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(AppTheme.hairline, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text("\(thread.character.displayName) • \(thread.latestSession.mode.title)")
                         .font(.system(.headline, design: .rounded, weight: .bold))
                         .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
-                    Text(thread.scene.title)
+
+                    HStack(spacing: 8) {
+                        ThreadMetaBadge(text: thread.scene.title)
+                        ThreadMetaBadge(text: thread.language.displayName)
+                    }
+
+                    Text(thread.summaryLead)
                         .font(.system(.caption, design: .rounded, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.49, green: 0.43, blue: 0.38))
-                    Text("\(thread.language.displayName) • \(thread.sessions.count) sessions")
-                        .font(.system(.caption2, design: .rounded, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.46, green: 0.42, blue: 0.38))
+                        .foregroundStyle(Color(red: 0.48, green: 0.42, blue: 0.38))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                Spacer()
+                VStack(alignment: .trailing, spacing: 8) {
+                    Text(thread.latestSession.startedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(.caption, design: .rounded))
+                        .foregroundStyle(.secondary)
 
-                Text(thread.latestSession.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(.caption, design: .rounded))
-                    .foregroundStyle(.secondary)
+                    preview
+                }
             }
 
             if let scenario = thread.scenario {
@@ -247,7 +292,7 @@ private struct ThreadHistoryCard: View {
             Text(thread.threadSummary)
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(4)
 
             if let mission = thread.threadMission {
                 Text(mission)
@@ -265,15 +310,20 @@ private struct ThreadHistoryCard: View {
                 Text(continuationCue)
                     .font(.system(.caption, design: .rounded))
                     .foregroundStyle(Color(red: 0.44, green: 0.40, blue: 0.39))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Color(red: 0.98, green: 0.95, blue: 0.91))
+                    )
             }
 
-            HStack {
-                Label(durationText, systemImage: "clock")
-                Spacer()
-                Label("\(thread.latestSession.turns.count) turns", systemImage: "text.bubble")
+            HStack(spacing: 8) {
+                ThreadMetaBadge(text: durationText, systemImage: "clock")
+                ThreadMetaBadge(text: "\(thread.latestSession.turns.count) turns", systemImage: "text.bubble")
+                ThreadMetaBadge(text: "\(thread.sessions.count) sessions", systemImage: "square.stack")
             }
-            .font(.system(.caption, design: .rounded, weight: .semibold))
-            .foregroundStyle(Color(red: 0.44, green: 0.40, blue: 0.39))
 
             if let goalSummary = thread.latestSession.feedbackReport?.goalCompletionSummary, goalSummary.isEmpty == false {
                 Text(goalSummary)
@@ -324,6 +374,29 @@ private struct ThreadHistoryCard: View {
             return "\(totalMinutes) min"
         }
         return "<1 min"
+    }
+}
+
+private struct ThreadMetaBadge: View {
+    let text: String
+    var systemImage: String? = nil
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .bold))
+            }
+            Text(text)
+                .font(.system(.caption, design: .rounded, weight: .semibold))
+        }
+        .foregroundStyle(Color(red: 0.44, green: 0.40, blue: 0.39))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(Color(red: 0.96, green: 0.94, blue: 0.91))
+        )
     }
 }
 
