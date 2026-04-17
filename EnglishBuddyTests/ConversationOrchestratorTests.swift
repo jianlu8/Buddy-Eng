@@ -3,6 +3,58 @@ import XCTest
 
 @MainActor
 final class ConversationOrchestratorTests: XCTestCase {
+    func testSpokenTextNormalizerRemovesMarkdownAndEmoji() {
+        var normalizer = SpokenTextNormalizer()
+        var rawBuffer = "That’s *really* nice 😊"
+
+        let result = normalizer.normalizeStreamingBuffer(&rawBuffer, finalize: true)
+
+        XCTAssertEqual(result.spokenText, "That’s really nice")
+        XCTAssertTrue(result.hasSpeakableContent)
+        XCTAssertFalse(result.hasDeferredMarkup)
+    }
+
+    func testSpokenTextNormalizerConvertsOrderedListsIntoSpeech() {
+        var normalizer = SpokenTextNormalizer()
+        var rawBuffer = "1. Try shadowing. 2. Slow down."
+
+        let result = normalizer.normalizeStreamingBuffer(&rawBuffer, finalize: true)
+
+        XCTAssertEqual(result.spokenText, "First, try shadowing. Second, slow down.")
+        XCTAssertTrue(result.suppressedCategories.contains(.listMarker))
+    }
+
+    func testSpokenTextNormalizerPreservesMarkdownLinkLabelOnly() {
+        var normalizer = SpokenTextNormalizer()
+        var rawBuffer = "[OpenAI](https://openai.com)"
+
+        let result = normalizer.normalizeStreamingBuffer(&rawBuffer, finalize: true)
+
+        XCTAssertEqual(result.spokenText, "OpenAI")
+        XCTAssertTrue(result.suppressedCategories.contains(.links))
+    }
+
+    func testSpokenTextNormalizerSuppressesInlineCode() {
+        var normalizer = SpokenTextNormalizer()
+        var rawBuffer = "Use `print()` here"
+
+        let result = normalizer.normalizeStreamingBuffer(&rawBuffer, finalize: true)
+
+        XCTAssertEqual(result.spokenText, "Use here")
+        XCTAssertTrue(result.suppressedCategories.contains(.code))
+    }
+
+    func testSpokenTextNormalizerSkipsFormattingPrefixes() {
+        var normalizer = SpokenTextNormalizer()
+        var rawBuffer = "### Tips\n- item\n> quote"
+
+        let result = normalizer.normalizeStreamingBuffer(&rawBuffer, finalize: true)
+
+        XCTAssertEqual(result.spokenText, "Tips item quote")
+        XCTAssertTrue(result.suppressedCategories.contains(.markdownControl))
+        XCTAssertTrue(result.suppressedCategories.contains(.listMarker))
+    }
+
     func testSpeechChunkerSentencePolicyFlushesAtSentenceBoundary() {
         var chunker = ConversationOrchestrator.SpeechChunker(policy: .sentence)
 
@@ -114,6 +166,53 @@ final class ConversationOrchestratorTests: XCTestCase {
         await sendTask.value
     }
 
+    func testOrchestratorSanitizesStreamingMarkdownBeforeTTS() async throws {
+        let engine = ControlledInferenceEngine()
+        let speech = MockSpeechPipeline()
+        let harness = try await makeHarness(
+            engine: engine,
+            speech: speech,
+            speechChunkingPolicy: .phrase
+        )
+        let orchestrator = harness.orchestrator
+
+        let sendTask = Task {
+            await orchestrator.sendTextFallback("Say something natural.")
+        }
+
+        await waitUntil { engine.hasPendingResponse }
+        engine.emitLateToken("That is *really")
+        await Task.yield()
+        XCTAssertTrue(speech.spokenChunks.isEmpty)
+
+        engine.emitLateToken("* nice.")
+        await waitUntil { speech.spokenChunks.count == 1 }
+
+        XCTAssertEqual(speech.spokenChunks.first?.text, "That is really nice.")
+        engine.finishCurrentResponse(with: "That is *really* nice.")
+        await sendTask.value
+    }
+
+    func testOrchestratorDropsEmojiFromSpokenChunks() async throws {
+        let engine = ControlledInferenceEngine()
+        let speech = MockSpeechPipeline()
+        let harness = try await makeHarness(engine: engine, speech: speech)
+        let orchestrator = harness.orchestrator
+
+        let sendTask = Task {
+            await orchestrator.sendTextFallback("Say hello.")
+        }
+
+        await waitUntil { engine.hasPendingResponse }
+        engine.emitLateToken("Nice 😊")
+        engine.finishCurrentResponse(with: "Nice 😊")
+        await sendTask.value
+        await Task.yield()
+
+        XCTAssertEqual(speech.spokenChunks.last?.text, "Nice")
+        XCTAssertFalse(speech.spokenChunks.contains(where: { $0.text.contains("😊") }))
+    }
+
     func testPreparedCallQueuesTTSWarmupForSelectedVoice() async throws {
         let speech = MockSpeechPipeline()
         let harness = try await makeHarness(engine: MockInferenceEngine(), speech: speech)
@@ -183,6 +282,29 @@ final class ConversationOrchestratorTests: XCTestCase {
             orchestrator.visibleTurns.last(where: { $0.role == .assistant })?.text,
             "Kyoto feels calm."
         )
+    }
+
+    func testBargeInDoesNotSpeakDeferredMarkdownTail() async throws {
+        let engine = ControlledInferenceEngine()
+        let speech = MockSpeechPipeline()
+        let harness = try await makeHarness(engine: engine, speech: speech)
+        let orchestrator = harness.orchestrator
+
+        let sendTask = Task {
+            await orchestrator.sendTextFallback("Tell me something.")
+        }
+
+        await waitUntil { engine.hasPendingResponse }
+        engine.emitLateToken("That feels *really")
+        speech.onSpeechStateChange?(true)
+        speech.onPartialTranscript?("Wait")
+        speech.onVoiceActivityStateChange?(.userSpeaking)
+
+        await Task.yield()
+        XCTAssertTrue(speech.spokenChunks.isEmpty)
+
+        engine.finishCurrentResponse(with: "That feels *really* calm.")
+        await sendTask.value
     }
 
     func testEndCallPersistsSpeechMetricsFromCaptionSpeechAndLipSync() async throws {

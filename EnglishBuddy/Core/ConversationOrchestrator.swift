@@ -19,7 +19,15 @@ final class ConversationOrchestrator: ObservableObject {
         }
 
         mutating func append(_ token: String) -> SpeechChunk? {
-            buffer += token
+            if buffer.isEmpty {
+                buffer = token
+            } else if let lastCharacter = buffer.last,
+                      let firstCharacter = token.first,
+                      shouldInsertSpace(between: lastCharacter, and: firstCharacter) {
+                buffer += " " + token
+            } else {
+                buffer += token
+            }
             guard shouldFlush(afterAppending: token) else { return nil }
             return dequeueChunk(isFinal: false)
         }
@@ -69,6 +77,13 @@ final class ConversationOrchestrator: ObservableObject {
                 return trimmedBuffer.count >= 72
             }
         }
+
+        private func shouldInsertSpace(between left: Character, and right: Character) -> Bool {
+            guard left.isWhitespace == false, right.isWhitespace == false else { return false }
+            guard ",.;:!?)]}".contains(right) == false else { return false }
+            guard "([{".contains(left) == false else { return false }
+            return true
+        }
     }
 
     @Published private(set) var phase: CallPhase = .idle
@@ -106,7 +121,10 @@ final class ConversationOrchestrator: ObservableObject {
 
     private var currentMode: ConversationMode = .chat
     private var speechChunker = SpeechChunker()
+    private var spokenTextNormalizer = SpokenTextNormalizer()
     private var lastAssistantResponse = ""
+    private var lastAssistantSpokenResponse = ""
+    private var pendingAssistantSpokenRawBuffer = ""
     private var isAssistantSpeaking = false
     private var isGeneratingResponse = false
     private var activeResponseSessionID: UUID?
@@ -154,12 +172,15 @@ final class ConversationOrchestrator: ObservableObject {
         setLatestFeedback(nil)
         setErrorMessage(nil)
         lastAssistantResponse = ""
+        lastAssistantSpokenResponse = ""
         didPersistCurrentAssistantTurn = false
         hasStartedOpeningTurn = false
         audioLevel = 0
         currentVoiceStyle = preparedCall.voiceStyle
         currentSpeechChunkingPolicy = preparedCall.speechChunkingPolicy
         speechChunker.reset(policy: preparedCall.speechChunkingPolicy)
+        spokenTextNormalizer.reset()
+        pendingAssistantSpokenRawBuffer = ""
         lastUserTranscriptCommitAt = .distantPast
         lastAssistantTranscriptCommitAt = .distantPast
         activeResponseSessionID = nil
@@ -256,6 +277,9 @@ final class ConversationOrchestrator: ObservableObject {
         setAvatarState(.idle)
         activeResponseSessionID = nil
         speechChunker.reset(policy: .adaptive)
+        spokenTextNormalizer.reset()
+        pendingAssistantSpokenRawBuffer = ""
+        lastAssistantSpokenResponse = ""
         lastUserTranscriptCommitAt = .distantPast
         lastAssistantTranscriptCommitAt = .distantPast
         pendingUserTranscripts = []
@@ -312,9 +336,12 @@ final class ConversationOrchestrator: ObservableObject {
         setLiveUserTranscript("")
         setLiveAssistantTranscript("")
         speechChunker.reset(policy: .adaptive)
+        spokenTextNormalizer.reset()
+        pendingAssistantSpokenRawBuffer = ""
         lastUserTranscriptCommitAt = .distantPast
         lastAssistantTranscriptCommitAt = .distantPast
         lastAssistantResponse = ""
+        lastAssistantSpokenResponse = ""
         didPersistCurrentAssistantTurn = false
         hasStartedOpeningTurn = false
         currentSpeechChunkingPolicy = .adaptive
@@ -487,8 +514,11 @@ final class ConversationOrchestrator: ObservableObject {
         setLiveAssistantTranscript("")
         setLipSyncFrame(.neutral)
         speechChunker.reset(policy: currentSpeechChunkingPolicy)
+        spokenTextNormalizer.reset()
+        pendingAssistantSpokenRawBuffer = ""
         lastAssistantTranscriptCommitAt = .distantPast
         lastAssistantResponse = ""
+        lastAssistantSpokenResponse = ""
         didPersistCurrentAssistantTurn = false
 
         do {
@@ -498,7 +528,7 @@ final class ConversationOrchestrator: ObservableObject {
                 guard self.shouldApplyResponseUpdates(for: responseSessionID) else { return }
                 self.lastAssistantResponse += token
                 self.commitLiveAssistantTranscript(with: token)
-                self.flushSpeechIfNeeded(using: token)
+                self.enqueueSpokenAssistantToken(token)
             }
 
             if shouldApplyResponseUpdates(for: responseSessionID) {
@@ -514,6 +544,7 @@ final class ConversationOrchestrator: ObservableObject {
         } catch {
             if shouldApplyResponseUpdates(for: responseSessionID) {
                 if isCancellationError(error) {
+                    discardPendingSpokenText()
                     let partial = liveAssistantTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                     if partial.isEmpty == false {
                         await persistAssistantTurnIfNeeded(text: partial, wasInterrupted: true)
@@ -521,6 +552,7 @@ final class ConversationOrchestrator: ObservableObject {
                     setPhase(.interrupted)
                     setAvatarState(.interrupted)
                 } else {
+                    discardPendingSpokenText()
                     setErrorMessage(error.localizedDescription)
                     setPhase(.error(error.localizedDescription))
                     setAvatarState(.error)
@@ -539,6 +571,7 @@ final class ConversationOrchestrator: ObservableObject {
 
         pendingBargeInActivatedAt = nil
         performanceTracer.markBargeInRequested()
+        discardPendingSpokenText()
         lastSpeechInterruption = SpeechInterruptionSnapshot(
             reason: .bargeIn,
             assistantText: liveAssistantTranscript,
@@ -561,12 +594,42 @@ final class ConversationOrchestrator: ObservableObject {
         setAvatarState(.interrupted)
     }
 
-    private func flushSpeechIfNeeded(using latestToken: String) {
-        guard let chunk = speechChunker.append(latestToken) else { return }
+    private func enqueueSpokenAssistantToken(_ token: String) {
+        pendingAssistantSpokenRawBuffer += token
+        drainPendingSpokenText(finalize: false, allowSpeech: true)
+    }
+
+    private func drainPendingSpokenText(finalize: Bool, allowSpeech: Bool) {
+        let result = spokenTextNormalizer.normalizeStreamingBuffer(
+            &pendingAssistantSpokenRawBuffer,
+            finalize: finalize
+        )
+        guard result.hasSpeakableContent else { return }
+
+        if lastAssistantSpokenResponse.isEmpty {
+            lastAssistantSpokenResponse = result.spokenText
+        } else {
+            lastAssistantSpokenResponse += " " + result.spokenText
+        }
+
+        guard allowSpeech else { return }
+        flushSpeechIfNeeded(using: result.spokenText)
+    }
+
+    private func discardPendingSpokenText() {
+        drainPendingSpokenText(finalize: true, allowSpeech: false)
+        speechChunker.reset(policy: currentSpeechChunkingPolicy)
+        spokenTextNormalizer.reset()
+        pendingAssistantSpokenRawBuffer = ""
+    }
+
+    private func flushSpeechIfNeeded(using normalizedText: String) {
+        guard let chunk = speechChunker.append(normalizedText) else { return }
         speakPreparedChunks([chunk])
     }
 
     private func flushRemainingSpeech() {
+        drainPendingSpokenText(finalize: true, allowSpeech: true)
         guard let chunk = speechChunker.flushRemaining() else { return }
         speakPreparedChunks([chunk])
     }
@@ -601,9 +664,13 @@ final class ConversationOrchestrator: ObservableObject {
 
     private func isLikelyEcho(_ transcript: String) -> Bool {
         let normalized = transcript.lowercased()
-        let assistant = lastAssistantResponse.lowercased()
-        guard assistant.isEmpty == false else { return false }
-        return assistant.contains(normalized) || normalized.contains(assistant.suffix(24))
+        let rawAssistant = lastAssistantResponse.lowercased()
+        let spokenAssistant = lastAssistantSpokenResponse.lowercased()
+        let candidates = [rawAssistant, spokenAssistant].filter { $0.isEmpty == false }
+        guard candidates.isEmpty == false else { return false }
+        return candidates.contains { assistant in
+            assistant.contains(normalized) || normalized.contains(assistant.suffix(24))
+        }
     }
 
     private func persistAssistantTurnIfNeeded(text: String, wasInterrupted: Bool) async {

@@ -32,13 +32,16 @@ struct PromptComposer {
 
         let responseStyle: String
         let modeDirective: String
+        let spokenOutputDirective: String
         switch mode {
         case .chat:
             modeDirective = "Behave like a warm AI video-call companion who also quietly improves the learner's English. Protect flow first."
             responseStyle = "Keep replies short enough to feel interruptible, emotionally natural, and easy to continue. Ask only one follow-up at a time."
+            spokenOutputDirective = "Reply in natural spoken English only. Do not output emoji, markdown, bullets, numbered formatting, code, URLs, file paths, speaker labels, or decorative symbols."
         case .tutor:
             modeDirective = "Behave like a proactive speaking tutor inside a video call. Push one micro-goal, ask for clearer retries, and track progress toward the current mission."
             responseStyle = "Keep replies brief but directional. Ask for one reason, one example, one comparison, or one restatement."
+            spokenOutputDirective = "Reply in natural spoken English only. If you need structure, say it conversationally like \"First\" and \"Then,\" not as bullets or numbered lists. Do not output emoji, markdown, code, URLs, file paths, speaker labels, or decorative symbols."
         }
 
         let systemPrompt = """
@@ -66,8 +69,9 @@ struct PromptComposer {
         \(explanationPolicy)
         \(modeDirective)
         \(responseStyle)
+        \(spokenOutputDirective)
         Sound like a real call, not like a chatbot. Keep spoken replies easy to interrupt.
-        Do not output stage directions, markdown, speaker labels, or quotation marks around speech.
+        Do not output stage directions, markdown, speaker labels, quotation marks around speech, or any text that would sound unnatural if read aloud.
         """
 
         let starterMessages: [String]
