@@ -39,7 +39,7 @@ struct PersonalizationSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground(style: .onboarding)
+                AppCanvasBackground()
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 20) {
@@ -580,7 +580,15 @@ private struct SetupFact: View {
 
 private extension View {
     func panelCard() -> some View {
-        surfaceCard()
+        padding(18)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.white.opacity(0.94))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            }
     }
 }
 

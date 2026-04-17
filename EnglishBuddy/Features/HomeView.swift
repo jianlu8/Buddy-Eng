@@ -92,23 +92,11 @@ struct HomeView: View {
                 )
 
                 if let recentSession {
-                    AppSectionHeader(
-                        eyebrow: "Resume",
-                        title: "Pick up the last thread",
-                        subtitle: "Jump back into the most recent call without reopening the whole archive."
-                    )
                     ContinueConversationCard(session: recentSession, threadState: recentThreadState) {
                         Task { await continueSession(recentSession) }
                     }
                 }
 
-                AppSectionHeader(
-                    eyebrow: rootState.selectedMode == .chat ? "Explore" : "Guided practice",
-                    title: rootState.selectedMode == .chat ? "Try another conversation angle" : "Choose a sharper guided activity",
-                    subtitle: rootState.selectedMode == .chat
-                        ? "These are lighter theme switches for when you want a fresh scene, not a different product flow."
-                        : "Keep Tutor focused: one mission, one activity, one clear next step."
-                )
                 ScenarioLaunchRail(
                     mode: rootState.selectedMode,
                     presets: scenarioPresets,
@@ -155,8 +143,8 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, 20)
-            .padding(.top, 22)
-            .padding(.bottom, 40)
+            .padding(.top, 18)
+            .padding(.bottom, 32)
         }
         .background(Color.clear)
         .navigationBarHidden(true)
@@ -173,22 +161,12 @@ struct HomeView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    AppCapsuleBadge(text: "Offline ready", tint: AppTheme.coolAccent)
-                    AppCapsuleBadge(
-                        text: "English voice calls",
-                        tint: AppTheme.warmAccent,
-                        foreground: AppTheme.ink,
-                        backgroundOpacity: 0.20
-                    )
-                }
-
                 Text("EnglishBuddy")
                     .font(.system(size: 30, weight: .black, design: .rounded))
-                    .foregroundStyle(AppTheme.ink)
-                Text("Your private English call space. Start fast, keep the same companion, and pick the thread back up any time.")
+                    .foregroundStyle(Color(red: 0.15, green: 0.13, blue: 0.20))
+                Text("Offline video-call English practice with a character that remembers your pace.")
                     .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(AppTheme.mutedInk)
+                    .foregroundStyle(Color(red: 0.35, green: 0.32, blue: 0.38))
             }
 
             Spacer(minLength: 12)
@@ -334,22 +312,30 @@ private struct CustomizationDock: View {
         } label: {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Studio & call setup")
+                    Text("Customize This Call")
                         .font(.system(.title3, design: .rounded, weight: .bold))
-                        .foregroundStyle(AppTheme.ink)
-                    Text("Keep the home screen calm. Fine-tune character, scene, and visual direction only when you want to.")
+                        .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
+                    Text("Character, scene, style, and language stay available here without taking over the first screen.")
                         .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(AppTheme.mutedInk)
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
                 Image(systemName: isExpanded ? "chevron.up.circle.fill" : "slider.horizontal.3")
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(AppTheme.warmAccent)
+                    .foregroundStyle(Color(red: 0.92, green: 0.42, blue: 0.27))
             }
         }
-        .surfaceCard(fill: AppTheme.secondarySurface, shadowOpacity: 0.05)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color.white.opacity(0.94))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        }
     }
 }
 
@@ -361,19 +347,15 @@ private struct HeaderIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(AppTheme.ink)
+                .foregroundStyle(Color(red: 0.18, green: 0.17, blue: 0.24))
                 .frame(width: 44, height: 44)
                 .background(
                     Circle()
-                        .fill(AppTheme.surface)
-                        .overlay(
-                            Circle()
-                                .stroke(AppTheme.hairline, lineWidth: 1)
-                        )
-                        .shadow(color: Color.black.opacity(0.06), radius: 14, y: 8)
+                        .fill(Color.white.opacity(0.94))
+                        .shadow(color: Color.black.opacity(0.05), radius: 12, y: 6)
                 )
         }
-        .buttonStyle(AppIconChromeButtonStyle())
+        .buttonStyle(.plain)
     }
 }
 
@@ -389,20 +371,33 @@ private struct CharacterStageCard: View {
     let dismissRecovery: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 18) {
             heroHeader
 
             modePicker
 
-            startButton
+            VStack(alignment: .leading, spacing: 12) {
+                StageCalloutCard(
+                    title: scenario.title,
+                    subtitle: scenario.summary,
+                    accent: Color.black.opacity(0.22)
+                )
 
-            focusStack
+                StageCalloutCard(
+                    title: learningPlan.title,
+                    subtitle: learningPlan.mission,
+                    footnote: learningPlan.successSignal,
+                    accent: Color.black.opacity(0.28)
+                )
+            }
+
+            startButton
 
             if case let .recoverableFailure(_, message, suggestedAction) = startupState {
                 RecoveryCard(message: message, suggestedAction: suggestedAction, dismissAction: dismissRecovery)
             }
         }
-        .padding(22)
+        .padding(24)
         .background(
             RoundedRectangle(cornerRadius: 34, style: .continuous)
                 .fill(backgroundGradient)
@@ -450,15 +445,14 @@ private struct CharacterStageCard: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(mode.title)
-                            .font(.system(.subheadline, design: .rounded, weight: .bold))
-                        Text(mode == .chat ? "Natural back-and-forth" : "Mission-led coaching")
-                            .font(.system(.caption2, design: .rounded))
+                            .font(.system(.headline, design: .rounded, weight: .bold))
+                        Text(mode.subtitle)
+                            .font(.system(.caption, design: .rounded))
                             .foregroundStyle(.white.opacity(selectedMode == mode ? 0.86 : 0.66))
-                            .lineLimit(1)
+                            .lineLimit(2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+                    .padding(14)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
                             .fill(selectedMode == mode ? Color.black.opacity(0.30) : Color.black.opacity(0.18))
@@ -494,27 +488,14 @@ private struct CharacterStageCard: View {
                 }
 
                 Spacer()
-
-                Image(systemName: "arrow.up.right.circle.fill")
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(0.94))
             }
             .padding(18)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.18),
-                                Color.black.opacity(0.18)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color.black.opacity(0.28))
                     .overlay(
                         RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.white.opacity(0.20), lineWidth: 1)
+                            .stroke(Color.white.opacity(0.14), lineWidth: 1)
                     )
             )
         }
@@ -547,7 +528,7 @@ private struct CharacterStageCard: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .layoutPriority(1)
 
-                heroPreview(width: 108, height: 150)
+                heroPreview(width: 132, height: 188)
                     .fixedSize()
             }
 
@@ -556,7 +537,7 @@ private struct CharacterStageCard: View {
 
                 HStack {
                     Spacer(minLength: 0)
-                    heroPreview(width: 124, height: 172)
+                    heroPreview(width: 146, height: 204)
                 }
             }
         }
@@ -580,46 +561,12 @@ private struct CharacterStageCard: View {
             Text(character.heroHeadline)
                 .font(.system(.title3, design: .rounded, weight: .bold))
                 .foregroundStyle(.white.opacity(0.94))
-                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text(character.roleDescription)
                 .font(.system(.subheadline, design: .rounded))
                 .foregroundStyle(.white.opacity(0.78))
-                .lineLimit(2)
-        }
-    }
-
-    private var focusStack: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(selectedMode == .chat ? "This call opens with" : "Current tutor focus")
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.90))
-
-                Spacer()
-
-                Text(scenario.suggestedReplyLength)
-                    .font(.system(.caption, design: .rounded, weight: .black))
-                    .foregroundStyle(.white.opacity(0.82))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Capsule().fill(Color.black.opacity(0.22)))
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                StageCalloutCard(
-                    title: scenario.title,
-                    subtitle: scenario.summary,
-                    accent: Color.black.opacity(0.22)
-                )
-
-                StageCalloutCard(
-                    title: learningPlan.title,
-                    subtitle: learningPlan.mission,
-                    footnote: learningPlan.successSignal,
-                    accent: Color.black.opacity(0.28)
-                )
-            }
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -996,10 +943,6 @@ private struct ContinueConversationCard: View {
         CharacterCatalog.profile(for: session.characterID)
     }
 
-    private var scene: CharacterScene {
-        CharacterCatalog.scene(for: session.sceneID, characterID: session.characterID)
-    }
-
     private var scenarioTitle: String {
         ScenarioCatalog.preset(for: session.scenarioID, mode: session.mode).title
     }
@@ -1025,77 +968,32 @@ private struct ContinueConversationCard: View {
         return nil
     }
 
-    private var durationText: String {
-        let totalMinutes = Int(session.duration / 60)
-        if totalMinutes > 0 {
-            return "\(totalMinutes) min"
-        }
-        return "<1 min"
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                AppSectionHeader(
-                    eyebrow: "Recent thread",
-                    title: "Continue last call",
-                    subtitle: nil
-                )
+                Label("Continue Last Call", systemImage: "arrow.clockwise.circle.fill")
+                    .font(.system(.title3, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
                 Spacer()
-                AppCapsuleBadge(
-                    text: session.mode.title,
-                    tint: AppTheme.warmAccent,
-                    foreground: AppTheme.ink,
-                    backgroundOpacity: 0.18
-                )
+                Text(session.mode.title)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.51, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
             }
 
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("\(character.displayName) • \(scenarioTitle)")
-                        .font(.system(.headline, design: .rounded, weight: .bold))
-                        .foregroundStyle(AppTheme.ink)
+            Text("\(character.displayName) • \(scenarioTitle)")
+                .font(.system(.headline, design: .rounded, weight: .bold))
+                .foregroundStyle(Color(red: 0.16, green: 0.14, blue: 0.20))
 
-                    Text(summaryText)
-                        .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(AppTheme.mutedInk)
-                        .lineLimit(4)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                CharacterStageSurface(
-                    character: character,
-                    scene: scene,
-                    visualStyle: .natural,
-                    emphasis: .preview,
-                    surfaceKind: .historyPreview,
-                    size: CGSize(width: 92, height: 118),
-                    isAnimated: false,
-                    showsBackdrop: false,
-                    groundShadowWidth: 64,
-                    groundShadowHeight: 10,
-                    groundShadowBlur: 7
-                )
-                .frame(width: 92, height: 118)
-                .background(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.90, green: 0.90, blue: 0.94),
-                                    Color(red: 0.97, green: 0.94, blue: 0.91)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .stroke(AppTheme.hairline, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            }
+            Text(summaryText)
+                .font(.system(.subheadline, design: .rounded))
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
 
             if let missionText {
                 Text(missionText)
@@ -1107,29 +1005,6 @@ private struct ContinueConversationCard: View {
                         Capsule()
                             .fill(Color(red: 0.96, green: 0.94, blue: 0.91))
                     )
-            }
-
-            HStack(spacing: 10) {
-                AppCapsuleBadge(
-                    text: session.startedAt.formatted(date: .abbreviated, time: .shortened),
-                    tint: AppTheme.coolAccent,
-                    foreground: AppTheme.ink,
-                    backgroundOpacity: 0.16
-                )
-
-                AppCapsuleBadge(
-                    text: "\(session.turns.count) turns",
-                    tint: AppTheme.coolAccent,
-                    foreground: AppTheme.ink,
-                    backgroundOpacity: 0.12
-                )
-
-                AppCapsuleBadge(
-                    text: durationText,
-                    tint: AppTheme.coolAccent,
-                    foreground: AppTheme.ink,
-                    backgroundOpacity: 0.12
-                )
             }
 
             Button(action: continueAction) {
@@ -1149,7 +1024,15 @@ private struct ContinueConversationCard: View {
             }
             .buttonStyle(.plain)
         }
-        .surfaceCard()
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.white.opacity(0.94))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        }
     }
 }
 
@@ -1163,16 +1046,19 @@ private struct ScenarioLaunchRail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(mode == .chat ? "Open a theme" : "Guided activities")
+                Text(mode == .chat ? "Open A Theme" : "Guided Activities")
                     .font(.system(.title3, design: .rounded, weight: .bold))
-                    .foregroundStyle(AppTheme.ink)
+                    .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
                 Spacer()
-                AppCapsuleBadge(
-                    text: mode.title,
-                    tint: AppTheme.warmAccent,
-                    foreground: AppTheme.ink,
-                    backgroundOpacity: 0.18
-                )
+                Text(mode.title)
+                    .font(.system(.caption, design: .rounded, weight: .bold))
+                    .foregroundStyle(Color(red: 0.51, green: 0.24, blue: 0.10))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color(red: 0.99, green: 0.92, blue: 0.85))
+                    )
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -1228,15 +1114,14 @@ private struct ScenarioLaunchRail: View {
                             .opacity(isBusy ? 0.6 : 1)
                         }
                         .frame(width: 248, alignment: .leading)
-                        .surfaceCard(fill: AppTheme.surface, shadowOpacity: 0.05)
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .fill(Color.white.opacity(0.94))
+                        )
                         .overlay {
-                            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                                .stroke(
-                                    scenario.id == recommendedScenarioID
-                                        ? AppTheme.warmAccent.opacity(0.34)
-                                        : AppTheme.hairline,
-                                    lineWidth: scenario.id == recommendedScenarioID ? 1.5 : 1
-                                )
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .stroke(scenario.id == recommendedScenarioID ? Color(red: 0.92, green: 0.42, blue: 0.27).opacity(0.38) : Color.black.opacity(0.05), lineWidth: scenario.id == recommendedScenarioID ? 1.5 : 1)
                         }
                     }
                 }
@@ -1261,7 +1146,11 @@ private struct PersonalizationPromptCard: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Color(red: 0.96, green: 0.42, blue: 0.26))
         }
-        .surfaceCard(fill: AppTheme.secondarySurface, shadowOpacity: 0.05)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .fill(Color.white.opacity(0.92))
+        )
     }
 }
 

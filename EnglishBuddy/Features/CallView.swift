@@ -246,18 +246,14 @@ private struct CallHeaderPane: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("LIVE CALL")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .tracking(1.1)
-                        .foregroundStyle(Color.white.opacity(0.68))
                     Text(context.character.displayName)
                         .font(.system(size: 28, weight: .black, design: .rounded))
                     Text(callStatusText(observer.state.phase))
                         .font(.system(.subheadline, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.76))
+                        .foregroundStyle(.white.opacity(0.72))
                 }
 
                 Spacer()
@@ -266,10 +262,9 @@ private struct CallHeaderPane: View {
             }
 
             Text(headerMetaLine)
-            .font(.system(.footnote, design: .rounded, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.72))
+                .font(.system(.footnote, design: .rounded, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
         }
-        .glassPanel(padding: 18, tint: Color.black.opacity(0.24), strokeOpacity: 0.10)
     }
 
     private var callModeLabel: String {
@@ -357,21 +352,15 @@ private struct SubtitleOverlayPane: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.22))
-                    .frame(width: 46, height: 5)
+                    .fill(Color.white.opacity(0.28))
+                    .frame(width: 42, height: 5)
                     .frame(maxWidth: .infinity)
 
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(display.accent.opacity(0.92))
-                                .frame(width: 8, height: 8)
-
-                            Text(display.speakerTitle)
-                                .font(.system(.caption, design: .rounded, weight: .bold))
-                                .foregroundStyle(display.accent.opacity(0.92))
-                        }
+                        Text(display.speakerTitle)
+                            .font(.system(.caption, design: .rounded, weight: .bold))
+                            .foregroundStyle(display.accent.opacity(0.92))
                         subtitleContent(display: display)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
@@ -385,7 +374,7 @@ private struct SubtitleOverlayPane: View {
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.94))
                             .frame(width: 38, height: 38)
-                            .background(Circle().fill(Color.white.opacity(0.08)))
+                            .background(Circle().fill(Color.black.opacity(0.26)))
                     }
                     .buttonStyle(.plain)
                 }
@@ -401,12 +390,10 @@ private struct SubtitleOverlayPane: View {
             .padding(.top, 12)
             .padding(.bottom, 18)
             .frame(maxWidth: .infinity, minHeight: panelHeight, maxHeight: panelHeight, alignment: .top)
-            .glassPanel(
-                padding: 0,
-                tint: layout.performanceProfile.prefersOpaqueSubtitleOverlay
-                    ? Color.black.opacity(0.80)
-                    : Color.black.opacity(0.54),
-                strokeOpacity: layout.performanceProfile.prefersOpaqueSubtitleOverlay ? 0.14 : 0.10
+            .background(overlayBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .stroke(Color.white.opacity(layout.performanceProfile.prefersOpaqueSubtitleOverlay ? 0.14 : 0.09), lineWidth: 1)
             )
             .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
             .padding(.horizontal, layout.horizontalPadding - 2)
@@ -490,6 +477,20 @@ private struct SubtitleOverlayPane: View {
         }
     }
 
+    @ViewBuilder
+    private var overlayBackground: some View {
+        let shape = RoundedRectangle(cornerRadius: 28, style: .continuous)
+
+        shape
+            .fill(layout.performanceProfile.prefersOpaqueSubtitleOverlay ? Color.black.opacity(0.82) : Color.black.opacity(0.60))
+            .overlay {
+                if layout.performanceProfile.prefersOpaqueSubtitleOverlay == false {
+                    shape
+                        .fill(.ultraThinMaterial)
+                        .opacity(0.78)
+                }
+            }
+    }
 }
 
 @MainActor
@@ -500,15 +501,12 @@ private struct CallBottomControls: View {
     @Binding var subtitleMode: SubtitleOverlayMode
     @Environment(\.dismiss) private var dismiss
     @State private var draft = ""
-    @State private var showingComposer = false
     @State private var focusRequestedAt: Date?
     @FocusState private var isTextFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 12) {
-            if showingComposer {
-                inlineComposer
-            }
+            inlineComposer
 
             HStack(spacing: 12) {
                 Button {
@@ -516,35 +514,26 @@ private struct CallBottomControls: View {
                         subtitleMode = subtitleMode == .collapsed ? .expanded : .collapsed
                     }
                 } label: {
-                    CallControlButton(
-                        title: "Captions",
-                        systemImage: subtitleMode == .collapsed ? "captions.bubble" : "captions.bubble.fill",
-                        isActive: subtitleMode != .collapsed
+                    Label(
+                        subtitleMode == .collapsed ? "Expand Captions" : "Collapse Captions",
+                        systemImage: subtitleMode == .collapsed ? "captions.bubble" : "captions.bubble.fill"
+                    )
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .fill(Color.black.opacity(0.24))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                                    .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                            )
                     )
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    let shouldShowComposer = showingComposer == false
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                        showingComposer = shouldShowComposer
-                    }
-                    if shouldShowComposer {
-                        focusRequestedAt = .now
-                        isTextFieldFocused = true
-                    } else {
-                        isTextFieldFocused = false
-                    }
-                } label: {
-                    CallControlButton(
-                        title: showingComposer ? "Hide" : "Text",
-                        systemImage: showingComposer ? "keyboard.chevron.compact.down" : "keyboard",
-                        isActive: showingComposer
-                    )
-                }
-                .buttonStyle(.plain)
-
-                Spacer(minLength: 8)
+                Spacer(minLength: 0)
 
                 Button {
                     Task {
@@ -556,29 +545,20 @@ private struct CallBottomControls: View {
                         Image(systemName: "phone.down.fill")
                         Text("End")
                     }
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.84)
+                    .font(.system(.headline, design: .rounded, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 16)
                     .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
                             .fill(Color(red: 0.89, green: 0.23, blue: 0.24))
                     )
                 }
                 .buttonStyle(.plain)
             }
-            .floatingDock()
-        }
-        .onChange(of: showingComposer) { _, isPresented in
-            textInputActive = isPresented || isTextFieldFocused
-            if isPresented == false {
-                isTextFieldFocused = false
-            }
         }
         .onChange(of: isTextFieldFocused) { _, isFocused in
-            textInputActive = isFocused || showingComposer
+            textInputActive = isFocused
             guard isFocused, let requestedAt = focusRequestedAt else { return }
             let elapsed = max(0, Int(Date().timeIntervalSince(requestedAt) * 1000))
             orchestrator.recordKeyboardOpenLatency(milliseconds: elapsed)
@@ -590,102 +570,51 @@ private struct CallBottomControls: View {
     }
 
     private var inlineComposer: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Text fallback")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.70))
-                    Text("Can't speak now? Send one line and keep the call moving.")
-                        .font(.system(.footnote, design: .rounded, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.86))
-                }
-
-                Spacer()
-
-                Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
-                        showingComposer = false
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("Type a message", text: $draft, axis: .vertical)
+                .focused($isTextFieldFocused)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1...4)
+                .submitLabel(.send)
+                .onSubmit(sendDraft)
+                .onTapGesture {
+                    if isTextFieldFocused == false {
+                        focusRequestedAt = .now
                     }
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .frame(width: 28, height: 28)
-                        .background(Circle().fill(Color.white.opacity(0.08)))
                 }
-                .buttonStyle(.plain)
-            }
 
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField("Type a short message", text: $draft, axis: .vertical)
-                    .focused($isTextFieldFocused)
-                    .font(.system(.body, design: .rounded))
-                    .foregroundStyle(.white)
-                    .tint(AppTheme.warmAccentSoft)
-                    .lineLimit(1...4)
-                    .submitLabel(.send)
-                    .onSubmit(sendDraft)
-                    .onTapGesture {
-                        if isTextFieldFocused == false {
-                            focusRequestedAt = .now
-                        }
-                    }
-
-                Button(action: sendDraft) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 28, weight: .semibold))
-                        .foregroundStyle(
-                            draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? Color.white.opacity(0.28)
-                                : Color(red: 1.0, green: 0.78, blue: 0.58)
-                        )
-                }
-                .buttonStyle(.plain)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button(action: sendDraft) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(
+                        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? Color.white.opacity(0.28)
+                            : Color(red: 1.0, green: 0.78, blue: 0.58)
+                    )
             }
+            .buttonStyle(.plain)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .glassPanel(padding: 16, tint: Color.black.opacity(0.32), strokeOpacity: 0.12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.black.opacity(0.32))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+        )
     }
 
     private func sendDraft() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.isEmpty == false else { return }
         draft = ""
-        showingComposer = false
-        isTextFieldFocused = false
         Task {
             await orchestrator.sendTextFallback(trimmed)
         }
-    }
-}
-
-@MainActor
-private struct CallControlButton: View {
-    let title: String
-    let systemImage: String
-    let isActive: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 15, weight: .semibold))
-            Text(title)
-                .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.84)
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            Capsule(style: .continuous)
-                .fill(isActive ? Color.white.opacity(0.16) : Color.white.opacity(0.08))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(Color.white.opacity(isActive ? 0.16 : 0.08), lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -719,31 +648,14 @@ private struct CallBackground: View {
             Circle()
                 .fill(Color.white.opacity(0.06))
                 .frame(width: 280, height: 280)
-                .blur(radius: 24)
+                .blur(radius: 18)
                 .offset(x: 120, y: -220)
 
             Circle()
                 .fill(Color.orange.opacity(0.12))
                 .frame(width: 220, height: 220)
-                .blur(radius: 34)
+                .blur(radius: 26)
                 .offset(x: -140, y: 260)
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.38), Color.clear, Color.black.opacity(0.42)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.04), Color.clear],
-                        startPoint: .bottom,
-                        endPoint: .top
-                    )
-                )
-                .blur(radius: 42)
-                .offset(y: 180)
         }
     }
 }
@@ -758,7 +670,14 @@ private struct StatusPill: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Capsule().fill(Color.white.opacity(0.10)))
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.28))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            )
     }
 }
 
@@ -775,7 +694,8 @@ private struct TranscriptSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground(style: .transcript)
+                Color(red: 0.98, green: 0.97, blue: 0.95)
+                    .ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(spacing: 12) {

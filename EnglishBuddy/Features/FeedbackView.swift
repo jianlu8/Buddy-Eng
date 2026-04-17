@@ -42,12 +42,11 @@ struct FeedbackView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground(style: .feedback)
+                AppCanvasBackground()
 
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: 18) {
                         heroSummary
-                        feedbackMetricsStrip
                         missionDashboard
                         correctionBoard
                         languageCarryOver
@@ -158,33 +157,10 @@ struct FeedbackView: View {
         )
     }
 
-    private var feedbackMetricsStrip: some View {
-        HStack(spacing: 10) {
-            FeedbackQuickMetric(
-                title: "Grammar",
-                value: "\(report.grammarIssues.count)",
-                tint: Color(red: 0.30, green: 0.47, blue: 0.79)
-            )
-            FeedbackQuickMetric(
-                title: "Vocabulary",
-                value: "\(report.carryOverVocabulary.count + report.vocabularySuggestions.count)",
-                tint: Color(red: 0.88, green: 0.53, blue: 0.21)
-            )
-            FeedbackQuickMetric(
-                title: "Pronunciation",
-                value: "\(report.pronunciationTips.count + report.pronunciationHighlights.count)",
-                tint: Color(red: 0.24, green: 0.53, blue: 0.41)
-            )
-        }
-    }
-
     private var missionDashboard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionHeader(
-                eyebrow: "Mission recap",
-                title: "What this session pushed forward",
-                subtitle: "Keep one clear objective, checkpoint, and success signal visible before you revisit the detailed notes."
-            )
+            Text("Mission Dashboard")
+                .font(.system(.title3, design: .rounded, weight: .bold))
 
             if let learningPlan {
                 DashboardRow(title: learningPlan.title, content: learningPlan.mission)
@@ -207,11 +183,8 @@ struct FeedbackView: View {
 
     private var correctionBoard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionHeader(
-                eyebrow: "Coach notes",
-                title: "Corrections worth revisiting",
-                subtitle: "This stays closer to a debrief than a dashboard: just the fixes and explanations that matter for the next call."
-            )
+            Text("Call Notes")
+                .font(.system(.title3, design: .rounded, weight: .bold))
 
             CorrectionGroup(title: "Grammar", items: report.grammarIssues, tint: Color.blue)
             CorrectionGroup(title: "Vocabulary", items: report.vocabularySuggestions, tint: Color.orange)
@@ -222,11 +195,8 @@ struct FeedbackView: View {
 
     private var languageCarryOver: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionHeader(
-                eyebrow: "Carry forward",
-                title: "What to keep in your mouth",
-                subtitle: "Save expressions and vocabulary that should survive into the next live call."
-            )
+            Text("Carry Forward")
+                .font(.system(.title3, design: .rounded, weight: .bold))
 
             DashboardRow(
                 title: mode == .tutor ? "Reusable Expressions" : "Smooth Phrases",
@@ -246,27 +216,10 @@ struct FeedbackView: View {
 
     private var nextCallBoard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionHeader(
-                eyebrow: "Next move",
-                title: "Open the next call with intention",
-                subtitle: "The next mission should feel concrete enough to start immediately, not like a generic recommendation."
-            )
+            Text("Next Call")
+                .font(.system(.title3, design: .rounded, weight: .bold))
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Recommended next mission")
-                    .font(.system(.subheadline, design: .rounded, weight: .bold))
-                    .foregroundStyle(Color(red: 0.33, green: 0.23, blue: 0.20))
-                Text(report.nextMission)
-                    .font(.system(.body, design: .rounded, weight: .semibold))
-                    .foregroundStyle(AppTheme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(red: 0.99, green: 0.92, blue: 0.86))
-            )
+            DashboardRow(title: "Recommended next mission", content: report.nextMission)
 
             if report.nextThemeSuggestion.isEmpty == false {
                 DashboardRow(title: "Next theme suggestion", content: report.nextThemeSuggestion)
@@ -288,11 +241,8 @@ struct FeedbackView: View {
 
     private var actionPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            AppSectionHeader(
-                eyebrow: "Launch next step",
-                title: "Stay in motion",
-                subtitle: "Jump straight back into the same relationship, roll into the next mission, or branch into a nearby theme."
-            )
+            Text("Launch Next Step")
+                .font(.system(.title3, design: .rounded, weight: .bold))
 
             if let continueThreadAction {
                 FeedbackActionButton(
@@ -389,36 +339,13 @@ private struct FeedbackActionButton: View {
                     .font(.system(.subheadline, design: .rounded, weight: .bold))
                     .foregroundStyle(Color(red: 0.51, green: 0.46, blue: 0.42))
             }
-            .surfaceCard(padding: 14, fill: AppTheme.canvasLift, shadowOpacity: 0.04)
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
+            )
         }
         .buttonStyle(.plain)
-    }
-}
-
-private struct FeedbackQuickMetric: View {
-    let title: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(value)
-                .font(.system(.title3, design: .rounded, weight: .black))
-                .foregroundStyle(AppTheme.ink)
-            Text(title)
-                .font(.system(.caption, design: .rounded, weight: .semibold))
-                .foregroundStyle(AppTheme.mutedInk)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.white.opacity(0.78))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(tint.opacity(0.22), lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -430,17 +357,17 @@ private struct DashboardRow: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
-                .foregroundStyle(AppTheme.mutedInk)
+                .foregroundStyle(Color(red: 0.28, green: 0.25, blue: 0.31))
             Text(content)
                 .font(.system(.body, design: .rounded))
-                .foregroundStyle(AppTheme.ink)
+                .foregroundStyle(Color(red: 0.17, green: 0.15, blue: 0.22))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(AppTheme.canvasLift)
+                .fill(Color(red: 0.98, green: 0.96, blue: 0.94))
         )
     }
 
@@ -561,6 +488,14 @@ private struct FlexibleRow<Data: RandomAccessCollection, Content: View>: View wh
 
 private extension View {
     func panelStyle() -> some View {
-        surfaceCard()
+        padding(18)
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.white.opacity(0.94))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(Color.black.opacity(0.05), lineWidth: 1)
+            }
     }
 }
