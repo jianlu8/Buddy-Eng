@@ -4,6 +4,12 @@ import Foundation
 @MainActor
 final class ConversationOrchestrator: ObservableObject {
     struct SpeechChunker {
+        private enum PhraseBoundaryStrength {
+            case none
+            case comma
+            case major
+        }
+
         private(set) var policy: SpeechChunkingPolicy
         private var buffer = ""
         private static let weakTrailingWords: Set<String> = [
@@ -56,45 +62,66 @@ final class ConversationOrchestrator: ObservableObject {
                 || latestToken.contains("?")
                 || latestToken.contains("!")
                 || latestToken.contains("\n")
-            let hitPhraseBoundary = latestToken.contains(",")
-                || latestToken.contains(";")
-                || latestToken.contains(":")
+            let boundaryStrength = phraseBoundaryStrength(in: latestToken)
             let wordCount = trimmedBuffer.split(whereSeparator: \.isWhitespace).count
             let hasWeakTrailingPhrase = endsWithWeakTrailingPhrase(trimmedBuffer)
+            let completedSegmentLength = lastDelimitedSegmentLength(in: trimmedBuffer)
 
             switch policy {
             case .sentence:
                 if endedSentence {
                     return true
                 }
-                if trimmedBuffer.count >= 120 {
-                    return hasWeakTrailingPhrase == false
-                }
-                return false
+                return shouldForceLengthFlush(
+                    totalLength: trimmedBuffer.count,
+                    completedSegmentLength: completedSegmentLength,
+                    threshold: 144,
+                    hasWeakTrailingPhrase: hasWeakTrailingPhrase
+                )
             case .phrase:
                 if endedSentence {
                     return true
                 }
-                if hitPhraseBoundary && (trimmedBuffer.count >= 14 || wordCount >= 3) {
-                    guard hasWeakTrailingPhrase == false else { return false }
+                if shouldFlushAtPhraseBoundary(
+                    strength: boundaryStrength,
+                    totalLength: trimmedBuffer.count,
+                    wordCount: wordCount,
+                    completedSegmentLength: completedSegmentLength,
+                    hasWeakTrailingPhrase: hasWeakTrailingPhrase,
+                    commaThreshold: 14,
+                    majorThreshold: 20,
+                    minimumCompletedSegmentLength: 12
+                ) {
                     return true
                 }
-                if trimmedBuffer.count >= 64 {
-                    return hasWeakTrailingPhrase == false
-                }
-                return false
+                return shouldForceLengthFlush(
+                    totalLength: trimmedBuffer.count,
+                    completedSegmentLength: completedSegmentLength,
+                    threshold: 64,
+                    hasWeakTrailingPhrase: hasWeakTrailingPhrase
+                )
             case .adaptive:
                 if endedSentence {
                     return true
                 }
-                if hitPhraseBoundary && (trimmedBuffer.count >= 28 || wordCount >= 6) {
-                    guard hasWeakTrailingPhrase == false else { return false }
+                if shouldFlushAtPhraseBoundary(
+                    strength: boundaryStrength,
+                    totalLength: trimmedBuffer.count,
+                    wordCount: wordCount,
+                    completedSegmentLength: completedSegmentLength,
+                    hasWeakTrailingPhrase: hasWeakTrailingPhrase,
+                    commaThreshold: 56,
+                    majorThreshold: 56,
+                    minimumCompletedSegmentLength: 26
+                ) {
                     return true
                 }
-                if trimmedBuffer.count >= 72 {
-                    return hasWeakTrailingPhrase == false
-                }
-                return false
+                return shouldForceLengthFlush(
+                    totalLength: trimmedBuffer.count,
+                    completedSegmentLength: completedSegmentLength,
+                    threshold: 118,
+                    hasWeakTrailingPhrase: hasWeakTrailingPhrase
+                )
             }
         }
 
@@ -120,6 +147,66 @@ final class ConversationOrchestrator: ObservableObject {
                 String($0).trimmingCharacters(in: CharacterSet.punctuationCharacters)
             }
             return recentTokens.contains(where: { Self.weakTrailingWords.contains($0) })
+        }
+
+        private func phraseBoundaryStrength(in token: String) -> PhraseBoundaryStrength {
+            if token.contains(";") || token.contains(":") {
+                return .major
+            }
+            if token.contains(",") {
+                return .comma
+            }
+            return .none
+        }
+
+        private func shouldFlushAtPhraseBoundary(
+            strength: PhraseBoundaryStrength,
+            totalLength: Int,
+            wordCount: Int,
+            completedSegmentLength: Int,
+            hasWeakTrailingPhrase: Bool,
+            commaThreshold: Int,
+            majorThreshold: Int,
+            minimumCompletedSegmentLength: Int
+        ) -> Bool {
+            guard hasWeakTrailingPhrase == false else { return false }
+
+            switch strength {
+            case .none:
+                return false
+            case .major:
+                return totalLength >= majorThreshold
+                    || wordCount >= 8
+                    || completedSegmentLength >= minimumCompletedSegmentLength
+            case .comma:
+                return totalLength >= commaThreshold
+                    && completedSegmentLength >= minimumCompletedSegmentLength
+            }
+        }
+
+        private func shouldForceLengthFlush(
+            totalLength: Int,
+            completedSegmentLength: Int,
+            threshold: Int,
+            hasWeakTrailingPhrase: Bool
+        ) -> Bool {
+            guard totalLength >= threshold else { return false }
+            guard hasWeakTrailingPhrase == false else { return false }
+            return completedSegmentLength >= 18
+        }
+
+        private func lastDelimitedSegmentLength(in text: String) -> Int {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: ",;:"))
+            guard trimmed.isEmpty == false else { return 0 }
+
+            guard let boundaryIndex = trimmed.lastIndex(where: { ".?!,;:\n".contains($0) }) else {
+                return trimmed.count
+            }
+
+            let start = trimmed.index(after: boundaryIndex)
+            let segment = trimmed[start...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return segment.count
         }
     }
 

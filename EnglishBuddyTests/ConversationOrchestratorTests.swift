@@ -105,6 +105,36 @@ final class ConversationOrchestratorTests: XCTestCase {
         XCTAssertNil(chunker.flushRemaining())
     }
 
+    func testSpeechChunkerAdaptivePolicyKeepsShortCommaClausesInSingleSentence() {
+        var chunker = ConversationOrchestrator.SpeechChunker(policy: .adaptive)
+
+        XCTAssertNil(chunker.append("I can help you practice your English,"))
+        XCTAssertNil(chunker.append(" answer your questions,"))
+
+        let chunk = chunker.append(" or just have a casual conversation!")
+
+        XCTAssertEqual(
+            chunk?.text,
+            "I can help you practice your English, answer your questions, or just have a casual conversation!"
+        )
+        XCTAssertEqual(chunk?.isFinal, false)
+        XCTAssertNil(chunker.flushRemaining())
+    }
+
+    func testSpeechChunkerAdaptivePolicyStillFlushesLongMajorBoundary() {
+        var chunker = ConversationOrchestrator.SpeechChunker(policy: .adaptive)
+
+        let chunk = chunker.append(
+            "Here is the core idea we need to remember for this exercise and repeat slowly;"
+        )
+
+        XCTAssertEqual(
+            chunk?.text,
+            "Here is the core idea we need to remember for this exercise and repeat slowly;"
+        )
+        XCTAssertEqual(chunk?.isFinal, false)
+    }
+
     func testFallbackTextCreatesAssistantTurnUsingSelectedModel() async throws {
         let engine = MockInferenceEngine()
         let speech = MockSpeechPipeline()

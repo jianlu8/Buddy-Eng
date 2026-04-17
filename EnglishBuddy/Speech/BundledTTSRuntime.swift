@@ -74,6 +74,7 @@ private final class BundledTTSWorker: @unchecked Sendable {
 @MainActor
 final class BundledTTSRuntime: TTSRuntimeProtocol {
     static let supportsTrueBundledExecution = true
+    private static let queueMergeGraceNanoseconds: UInt64 = 90_000_000
 
     var onSpeechStateChange: (@MainActor (Bool) -> Void)?
     var onSpeechEnvelope: (@MainActor (Double) -> Void)?
@@ -173,6 +174,12 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         }
 
         while activeGenerationID == generationID, pendingChunks.isEmpty == false {
+            if shouldDelayBeforeSynthesizingFirstPendingChunk() {
+                try? await Task.sleep(nanoseconds: Self.queueMergeGraceNanoseconds)
+                guard activeGenerationID == generationID else { return }
+                guard pendingChunks.isEmpty == false else { break }
+            }
+
             let chunk = pendingChunks.removeFirst()
             let text = chunk.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard text.isEmpty == false else { continue }
@@ -349,10 +356,20 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         let previousText = previous.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let currentText = current.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard previousText.isEmpty == false, currentText.isEmpty == false else { return false }
-        guard previousText.count <= 28 || currentText.count <= 22 else { return false }
 
         let previousEndsSentence = previousText.last.map { ".?!".contains($0) } ?? false
-        return previousEndsSentence == false
+        guard previousEndsSentence == false else { return false }
+
+        let combinedLength = previousText.count + currentText.count + 1
+        if endsWithContinuationBoundary(previousText) || endsWithWeakTrailingWord(previousText) {
+            return combinedLength <= 160
+        }
+
+        if previousText.count <= 36 || currentText.count <= 28 {
+            return combinedLength <= 108
+        }
+
+        return false
     }
 
     private func tickLipSync() {
@@ -377,6 +394,20 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
         return filesystem.embeddedSpeechAssetURL(for: assetID)
     }
 
+    private func shouldDelayBeforeSynthesizingFirstPendingChunk() -> Bool {
+        guard pendingChunks.count == 1, let first = pendingChunks.first else { return false }
+        guard first.isFinal == false else { return false }
+
+        let text = first.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.isEmpty == false else { return false }
+
+        if endsWithContinuationBoundary(text) || endsWithWeakTrailingWord(text) {
+            return true
+        }
+
+        return text.count <= 42
+    }
+
     private func resolvePreparation() -> BundledTTSPreparation? {
         guard let assetURL = resolveAssetURL() else { return nil }
         return BundledTTSPreparation(
@@ -389,6 +420,23 @@ final class BundledTTSRuntime: TTSRuntimeProtocol {
     private var missingAssetMessage: String {
         let assetID = descriptor.preferredAssetID ?? "unknown-tts-asset"
         return "Bundled TTS asset \(assetID) is missing from the app package."
+    }
+
+    private func endsWithContinuationBoundary(_ text: String) -> Bool {
+        guard let last = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return false }
+        return ",;:".contains(last)
+    }
+
+    private func endsWithWeakTrailingWord(_ text: String) -> Bool {
+        let weakWords: Set<String> = [
+            "a", "an", "the",
+            "and", "or", "but",
+            "to", "of", "for", "with", "in", "on", "at", "by", "from"
+        ]
+
+        guard let lastToken = text.lowercased().split(whereSeparator: \.isWhitespace).last else { return false }
+        let sanitized = String(lastToken).trimmingCharacters(in: CharacterSet.punctuationCharacters)
+        return weakWords.contains(sanitized)
     }
 
     private func speedScalar(for voiceStyle: VoiceStyle, voiceBundle: VoiceBundle) -> Float {
