@@ -68,6 +68,7 @@
 		8F32A35E60423991CDCA1341 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09CAFE39437202EF234D042A /* Protocols.swift */; };
 		8F6A0C638FF98D0AEA5D5D2A /* QuickStartSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8857F8633D805FBFC46EA24F /* QuickStartSheet.swift */; };
 		93B845B167BC33444AB1948E /* DevicePerformanceProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEA29186FF83710B52100930 /* DevicePerformanceProfile.swift */; };
+		9654AE1A38CA4ACF59CE6706 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCE6F6D61DCB249F7562640E /* AppTheme.swift */; };
 		972A5D5F7E1B6A2D35E4C061 /* PerformanceGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3AC56E5B675697DC1E11E4E /* PerformanceGovernor.swift */; };
 		9A30BA60F34E5144EAACB717 /* EnglishBuddyCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 54591E80EFCFDABEEBB47C33 /* EnglishBuddyCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		9B67033BFE4A8F222246D2D3 /* LiteRTInferenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7021F2F0CB67028F6DDBB2CB /* LiteRTInferenceEngine.swift */; };
@@ -215,6 +216,7 @@
 		CF98F7E8949E00123DC577FC /* CallStartupCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallStartupCoordinatorTests.swift; sourceTree = "<group>"; };
 		CFCCE1142297A07BAB9513A1 /* PortraitCharacterRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PortraitCharacterRuntime.swift; sourceTree = "<group>"; };
 		D5B1E623D51246B88D7B2567 /* FeedbackGeneratorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackGeneratorTests.swift; sourceTree = "<group>"; };
+		DCE6F6D61DCB249F7562640E /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		DD5E42F6EFC713F4CF47F475 /* SpeechFallbackASRRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechFallbackASRRuntime.swift; sourceTree = "<group>"; };
 		E27974B702203C80AC90C333 /* AssetStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetStateStore.swift; sourceTree = "<group>"; };
 		EF8674E7ED81F565A9EFFF07 /* LiteRTBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = LiteRTBridge.mm; sourceTree = "<group>"; };
@@ -339,6 +341,7 @@
 		76D8C79EEB5F0972E494ACC8 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				DCE6F6D61DCB249F7562640E /* AppTheme.swift */,
 				5CB16A1738809D58892EBC8C /* AvatarView.swift */,
 				33E1311C045E1D4BD7D55BEF /* CallStageLayout.swift */,
 				A7BD565C459B5334E8ED1351 /* CallView.swift */,
@@ -644,6 +647,7 @@
 				892F84660DBF4D78992726EA /* AppContainer.swift in Sources */,
 				835252F20EE8CA5610B6FEB5 /* AppFilesystem.swift in Sources */,
 				B680517C676F852D9D5BC789 /* AppLaunchProvisioner.swift in Sources */,
+				9654AE1A38CA4ACF59CE6706 /* AppTheme.swift in Sources */,
 				5598AAFD327AD9568B763F7B /* AssetStateStore.swift in Sources */,
 				9F13494144274FB8309C4B59 /* AvatarView.swift in Sources */,
 				0B5C3ACC2FD4AB6825C7BE92 /* BundledASRRuntime.swift in Sources */,

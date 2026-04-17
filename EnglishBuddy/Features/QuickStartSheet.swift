@@ -39,7 +39,7 @@ struct PersonalizationSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                AppCanvasBackground()
+                AppCanvasBackground(style: .onboarding)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 20) {
